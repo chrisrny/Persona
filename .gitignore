@@ -1,0 +1,36 @@
+# Secrets & credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+
+# Docker volumes / local data (n8n, Postgres)
+n8n_data/
+.n8n/
+postgres_data/
+pgdata/
+data/
+
+# Raw n8n exports (anonymize before moving them to workflows/)
+exports/
+*.raw.json
+
+# Logs & dumps
+*.log
+logs/
+*.sql.gz
+*.dump
+
+# Node (community nodes, scripts)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp

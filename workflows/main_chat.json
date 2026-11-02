@@ -1,0 +1,483 @@
+{
+  "id": "prsnMainChat0001",
+  "name": "Persona - main_chat",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "initialMessages": "Welcome to **Persona**, your personal AI news digest.\n\nTo get started:\n- `/register <username> <password> accept` to create an account\n- `/login <username> <password>` to log in\n\nUsername: 3 to 32 letters, digits or underscores. Password: 8 to 72 characters, no spaces.\n\n**Privacy:** Persona only stores your username, a hashed password, your email, your topics and your preferred delivery time, in order to send you your newsletter. You can view, pause or delete your data at any time from this chat. Adding `accept` to the register command means you agree to this.",
+        "options": {
+          "title": "Persona",
+          "subtitle": "Your personal AI news digest",
+          "inputPlaceholder": "Type a message or a command...",
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "47adb45a-2765-521c-bf88-42df466c7f77",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "b6f1c6d2-6a51-4c1e-9a43-7d2f0e3c9a11"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE sessions s\nSET expires_at = now() + interval '2 hours'\nFROM users u\nWHERE s.session_id = $1\n  AND s.expires_at > now()\n  AND u.id = s.user_id\nRETURNING s.user_id, u.username, u.role;",
+        "options": {
+          "queryReplacement": "={{ [ $('Chat Trigger').item.json.sessionId ] }}"
+        }
+      },
+      "id": "12f9885d-8e34-5e9b-91a7-13eb4f2f2368",
+      "name": "Find active session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7925972b-f97d-5e30-acaf-7ccf72bc87a6",
+              "leftValue": "={{ $json.user_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3b23b536-a150-5719-b63f-60e6644f4118",
+      "name": "Is logged in?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "prsnAuth00000001",
+          "mode": "list",
+          "cachedResultName": "Persona - auth"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "sessionId": "={{ $('Chat Trigger').item.json.sessionId }}",
+            "chatInput": "={{ $('Chat Trigger').item.json.chatInput }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "sessionId",
+              "displayName": "sessionId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "chatInput",
+              "displayName": "chatInput",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "2933cbdf-0f73-5075-9356-cfbd4d29188d",
+      "name": "Call auth",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        700,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d0d59fb6-4b67-592d-8498-baeae1fb8185",
+              "name": "output",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "68806279-09c1-52cc-860d-dccc0cc6e85e",
+      "name": "Auth reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        940,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "206aa19c-704d-5663-99f9-e6b1bb99a621",
+              "name": "command",
+              "value": "={{ ($('Chat Trigger').item.json.chatInput || '').trim().split(/\\s+/)[0].toLowerCase() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "bbab92ea-637c-5640-96b7-a8d2db36af10",
+      "name": "Normalize command",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        700,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "9c546b4c-58f8-5ee6-b9cf-39205370d157",
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/logout",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "/logout"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "bbc21d03-baa0-5a88-8e89-314e27210a8f",
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/login",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "/login"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7c23fb30-de7d-50ae-86f2-13bff78e2846",
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/register",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "/register"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "other"
+        }
+      },
+      "id": "1524657d-674c-5f51-988e-d5d377149c9d",
+      "name": "Route logged-in message",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        920,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM sessions WHERE session_id = $1 RETURNING user_id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Chat Trigger').item.json.sessionId ] }}"
+        }
+      },
+      "id": "27788eb4-d5a7-5aed-9c22-0bf2ca5f7175",
+      "name": "Close session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1160,
+        -40
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "efcad395-d6c3-58c0-9bc2-ed9a02b680a1",
+              "name": "output",
+              "value": "You are now logged out. See you soon!",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bd5ab049-9068-5dda-8df1-355b10f92da1",
+      "name": "Logout reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1380,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "271a56c6-15b0-52d4-aa1f-23c16933fb36",
+              "name": "output",
+              "value": "={{ 'You are already logged in as **' + $('Find active session').item.json.username + '**. Type `/logout` first to use another account.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9d4cb283-ea81-5810-ba02-0fdf7044f1e9",
+      "name": "Already logged in reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1160,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0dbfea59-c885-5e21-a5a1-5d9a90f8f166",
+              "name": "output",
+              "value": "={{ 'Hi **' + $('Find active session').item.json.username + '**! The assistant is not available yet. You can type `/logout` to log out.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d046cc68-cad1-5f6d-8dca-1e68f5702eed",
+      "name": "Assistant placeholder",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1160,
+        360
+      ]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Find active session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find active session": {
+      "main": [
+        [
+          {
+            "node": "Is logged in?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is logged in?": {
+      "main": [
+        [
+          {
+            "node": "Normalize command",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call auth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call auth": {
+      "main": [
+        [
+          {
+            "node": "Auth reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize command": {
+      "main": [
+        [
+          {
+            "node": "Route logged-in message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route logged-in message": {
+      "main": [
+        [
+          {
+            "node": "Close session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already logged in reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already logged in reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Assistant placeholder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close session": {
+      "main": [
+        [
+          {
+            "node": "Logout reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {},
+  "tags": []
+}

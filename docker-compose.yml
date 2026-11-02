@@ -33,10 +33,19 @@ services:
       N8N_PORT: 5678
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
+      # Used by scripts/import.sh to create the n8n credentials
+      POSTGRES_DB: ${POSTGRES_DB}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach an Ollama running on the host (Linux)
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+      - ./scripts:/scripts:ro
     ports:
       - "127.0.0.1:${N8N_PORT:-5678}:5678"
 

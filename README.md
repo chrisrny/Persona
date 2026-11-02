@@ -32,7 +32,7 @@ Users talk to a single chat interface to create an account, choose their topics 
    cd persona
    ```
 
-2. Create your environment file and replace every `change-me` value:
+2. Create your environment file and fill it in (every `change-me` value, your Gmail address and `OLLAMA_BASE_URL`, see [LLM setup](#llm-setup) and [Email setup](#email-setup)):
 
    ```bash
    cp .env.example .env
@@ -61,7 +61,7 @@ Persona uses a local model served by Ollama. The model must support tool calling
 ollama pull qwen2.5:7b
 ```
 
-n8n reaches it at `http://host.docker.internal:11434`.
+Set `OLLAMA_BASE_URL=http://host.docker.internal:11434` in `.env`.
 
 **Option B — Ollama in Docker**
 
@@ -70,32 +70,58 @@ docker compose --profile ollama up -d
 docker compose exec ollama ollama pull qwen2.5:7b
 ```
 
-n8n reaches it at `http://ollama:11434`.
+Set `OLLAMA_BASE_URL=http://ollama:11434` in `.env`.
 
 ### Email setup
 
 Newsletters are sent through Gmail SMTP with an app password (your real Gmail password is never used):
 
 1. Enable [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification) on the Gmail account.
-2. Create an [app password](https://myaccount.google.com/apppasswords) and keep the 16-character value.
+2. Create an [app password](https://myaccount.google.com/apppasswords).
+3. Set `SMTP_USER` (the Gmail address) and `SMTP_PASSWORD` (the app password, without spaces) in `.env`.
 
 ## Importing the workflows
 
-_TODO_
+Once n8n is running and the owner account is created, import the credentials and the workflows, then restart n8n:
+
+```bash
+docker compose exec n8n sh /scripts/import.sh
+docker compose restart n8n
+```
+
+The script creates the n8n credentials from your `.env`, imports every file of `workflows/` and publishes them. It can be run again after pulling new versions of the workflows (existing ones are overwritten).
+
+| Workflow | Role |
+| --- | --- |
+| `Persona - main_chat` | Chat entry point: session check, routing |
+| `Persona - auth` | Sign-up, login and sessions (sub-workflow, no LLM involved) |
 
 ## Credentials
 
-Credentials are never stored in this repository. Create them in n8n (**Credentials → Add credential**) with exactly these names so the imported workflows pick them up:
+Credentials are never stored in this repository: `scripts/import.sh` builds them from `.env`.
 
-| Name | Type | Values |
+| Name | Type | Built from |
 | --- | --- | --- |
-| `Postgres Persona` | Postgres | Host `postgres`, port `5432`, database `POSTGRES_DB`, user `APP_DB_USER`, password `APP_DB_PASSWORD` (from your `.env`) |
-| `LLM` | Ollama | Base URL `http://host.docker.internal:11434` (option A) or `http://ollama:11434` (option B) |
-| `SMTP Persona` | SMTP | User: your Gmail address, password: the app password, host `smtp.gmail.com`, port `465`, SSL/TLS enabled |
+| `Postgres Persona` | Postgres | `POSTGRES_DB`, `APP_DB_USER`, `APP_DB_PASSWORD` (host `postgres`, port `5432`) |
+| `LLM` | Ollama | `OLLAMA_BASE_URL` |
+| `SMTP Persona` | SMTP | `SMTP_USER`, `SMTP_PASSWORD` (host `smtp.gmail.com`, port `465`, SSL/TLS) |
+
+To change one later, edit `.env`, run `docker compose up -d` to reload the environment, then run the import script again.
 
 ## Using Persona through the chatbot
 
-_TODO_
+Open the chat at <http://localhost:5678/webhook/b6f1c6d2-6a51-4c1e-9a43-7d2f0e3c9a11/chat>.
+
+| Command | Effect |
+| --- | --- |
+| `/register <username> <password> accept` | Creates an account and logs you in. `accept` is your explicit consent to the privacy notice shown in the chat. |
+| `/login <username> <password>` | Logs you in |
+| `/logout` | Ends your session |
+
+- Username: 3 to 32 letters, digits or underscores (case-insensitive).
+- Password: 8 to 72 characters, no spaces.
+- A session lasts 2 hours after your last message.
+- After 5 failed logins, the account is locked for 15 minutes.
 
 ## Testing a scheduled newsletter
 
@@ -120,7 +146,12 @@ _TODO_
 
 ## Security
 
-_TODO_
+- **Authentication happens before the AI.** Sign-up, login and session checks are plain n8n nodes and SQL queries: the LLM never sees credentials and cannot be talked into skipping authentication.
+- **Passwords** are hashed with bcrypt (`pgcrypto`) and never stored or returned in clear text.
+- **Brute force**: 5 failed logins lock the account for 15 minutes; error messages never reveal whether a username exists.
+- **SQL injection**: every query uses bound parameters (`$1`, `$2`...).
+- **Least privilege**: workflows connect with `APP_DB_USER`, which can read and write data but cannot change the schema or the topic list.
+- **No password in the execution history**: `main_chat` and `auth` do not save their executions, since chat messages may contain passwords. n8n flags these runs as deleted right away and purges them from its database on its next pruning cycle. To debug, temporarily set **Workflow settings → Save successful production executions** back to *Save*.
 
 ## Project structure
 
@@ -130,6 +161,8 @@ persona/
 ├── db/
 │   ├── init.sql        # Database schema
 │   └── app-role.sh     # Least-privilege role used by n8n
+├── scripts/
+│   └── import.sh       # Imports credentials and workflows into n8n
 ├── docs/               # Architecture, GDPR, security audit
 ├── keynote/            # Presentation material
 ├── docker-compose.yml  # n8n + Postgres

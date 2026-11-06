@@ -52,7 +52,7 @@ n8n import:credentials --input="$CREDENTIALS_FILE"
 n8n import:workflow --separate --input=/workflows
 
 # Sub-workflows first, then the chat entry point
-for id in prsnAuth00000001 prsnMainChat0001; do
+for id in prsnAuth00000001 prsnUserTools001 prsnMainChat0001; do
   n8n publish:workflow --id="$id"
 done
 

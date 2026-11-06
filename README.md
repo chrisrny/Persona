@@ -51,6 +51,18 @@ Users talk to a single chat interface to create an account, choose their topics 
 
 > To reset everything (database included): `docker compose down -v`, then `docker compose up -d`.
 
+> **The database schema and the `APP_DB_USER` role are only created on the very first start**, when the Postgres volume is empty. If you change `POSTGRES_*` or `APP_DB_*` in `.env` afterwards, or if the first start failed, recreate the database volume (this deletes Persona's data, not your n8n account):
+>
+> ```bash
+> docker compose down
+> docker volume rm persona_postgres_data   # name shown by: docker volume ls
+> docker compose up -d
+> docker compose exec n8n sh /scripts/import.sh
+> docker compose restart n8n
+> ```
+>
+> If the chat answers "Error in workflow" with `password authentication failed for user "persona_app"`, this is the cause.
+
 ### LLM setup
 
 Persona uses a local model served by Ollama. The model must support tool calling.

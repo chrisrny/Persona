@@ -134,6 +134,8 @@ Open the chat at <http://localhost:5678/webhook/b6f1c6d2-6a51-4c1e-9a43-7d2f0e3c
 | `/logout` | Ends your session |
 | `/delete_account <password>` | Permanently deletes your account and all your data (see [GDPR](#gdpr)) |
 
+Messages are limited to 1,000 characters and 20 per minute per chat.
+
 - Username: 3 to 32 letters, digits or underscores (case-insensitive).
 - Password: 8 to 72 characters, no spaces.
 - A session lasts 2 hours after your last message.
@@ -205,6 +207,9 @@ News articles are not personal data and are kept after an account is deleted. Th
 - **The AI cannot reach other users' data.** The agent's tools never take a user id: `main_chat` injects the id of the authenticated session into every tool call, so even a manipulated model can only read or change the current user's settings. Every value the model provides is validated again (format, length, existing topic, real IANA timezone) before reaching the database.
 - **Separate conversation memory per user**: the memory is keyed on the chat session *and* the user, so after `/logout` and a login with another account in the same chat, the new user never sees the previous conversation.
 - **No destructive action through the AI**: deleting an account requires the `/delete_account <password>` command, which bypasses the assistant entirely.
+- **Message limits**: before anything else, `main_chat` rejects empty messages and messages over 1,000 characters, and applies rate limits (20 messages per minute per chat session, 200 per minute for the whole instance, to protect the local model).
+- **No technical details in errors**: if the database or the language model fails, the user gets a generic message ("something went wrong" / "the assistant is not available right now") instead of an n8n error. `/logout` and `/delete_account` keep working when the model is down.
+- **Prompt-injection resistant assistant**: the system prompt treats user messages and tool results as data, never as instructions, refuses to reveal its instructions and cannot switch accounts. Even if the model were fooled, it has no tool able to reach another user or delete an account.
 - **Narrow assistant**: the system prompt limits the assistant to newsletter settings and tells it to ignore requests to change its rules or play another role.
 - **Least privilege**: workflows connect with `APP_DB_USER`, which can read and write data but cannot change the schema or the topic list.
 - **No password in the execution history**: `main_chat`, `auth` and `user_tools` do not save their executions, since chat messages may contain passwords. n8n flags these runs as deleted right away and purges them from its database on its next pruning cycle. To debug, temporarily set **Workflow settings → Save successful production executions** back to *Save*.

@@ -109,7 +109,7 @@ The script creates the n8n credentials from your `.env`, imports every file of `
 | --- | --- |
 | `Persona - main_chat` | Chat entry point: session check, routing, AI agent |
 | `Persona - auth` | Sign-up, login and sessions (sub-workflow, no LLM involved) |
-| `Persona - user_tools` | The only actions the agent can perform on user data: read and update the user's preferences (sub-workflow) |
+| `Persona - user_tools` | The only actions the agent can perform on user data: read and update preferences, export all personal data, pause or resume the newsletter (sub-workflow) |
 
 ## Credentials
 
@@ -132,6 +132,7 @@ Open the chat at <http://localhost:5678/webhook/b6f1c6d2-6a51-4c1e-9a43-7d2f0e3c
 | `/register <username> <password> accept` | Creates an account and logs you in. `accept` is your explicit consent to the privacy notice shown in the chat. |
 | `/login <username> <password>` | Logs you in |
 | `/logout` | Ends your session |
+| `/delete_account <password>` | Permanently deletes your account and all your data (see [GDPR](#gdpr)) |
 
 - Username: 3 to 32 letters, digits or underscores (case-insensitive).
 - Password: 8 to 72 characters, no spaces.
@@ -145,6 +146,8 @@ Once logged in, just talk to the assistant in natural language, for example:
 - *"Send it to me at me@example.com every day at 8:30"*
 - *"I live in New York"* (timezone `America/New_York`)
 - *"What are my current settings?"*
+- *"What data do you store about me?"*
+- *"Pause my newsletter"* / *"Unsubscribe me"* / *"Resume my newsletter"*
 
 | Setting | Accepted values |
 | --- | --- |
@@ -175,7 +178,23 @@ All data lives in the `persona` Postgres database:
 
 ## GDPR
 
-_TODO_
+Persona is designed to be usable in the European Union.
+
+| Principle | How Persona applies it |
+| --- | --- |
+| **Explicit consent** | An account can only be created with `/register <username> <password> accept`, after the privacy notice is shown in the chat. The consent date is stored (`users.consent_at`). |
+| **Data minimisation** | Only what the newsletter needs is stored: username, password hash, email, topics, keywords, delivery time, timezone. No real name, no IP address, no tracking. |
+| **Purpose limitation** | The data is only used to build and send the user's newsletter. |
+| **No third-party processing** | The LLM runs locally (Ollama): conversations and preferences are never sent to an external AI provider. |
+| **Right of access** | Ask the assistant *"What data do you store about me?"*: it returns everything stored about you (the password only exists as an irreversible bcrypt hash). |
+| **Right to rectification** | Every setting can be changed at any time through the chat. |
+| **Right to object / unsubscribe** | *"Pause my newsletter"* stops all emails immediately while keeping the settings; *"Resume my newsletter"* starts them again. |
+| **Right to erasure** | `/delete_account <password>` deletes the account and, through `ON DELETE CASCADE`, its sessions, topics and newsletter history in a single transaction. The password is asked again so a stolen session cannot erase an account. |
+| **Security of processing** | See [Security](#security). |
+
+Account deletion is a plain chat command handled by n8n nodes and SQL, never by the AI: the password is checked by the database and never reaches the language model. Wrong passwords count as failed logins (5 failures lock the account for 15 minutes and close all its sessions).
+
+News articles are not personal data and are kept after an account is deleted. The assistant's short-term conversation memory lives in the n8n process only (last 10 messages per session) and is cleared when n8n restarts.
 
 ## Security
 
@@ -185,6 +204,7 @@ _TODO_
 - **SQL injection**: every query uses bound parameters (`$1`, `$2`...).
 - **The AI cannot reach other users' data.** The agent's tools never take a user id: `main_chat` injects the id of the authenticated session into every tool call, so even a manipulated model can only read or change the current user's settings. Every value the model provides is validated again (format, length, existing topic, real IANA timezone) before reaching the database.
 - **Separate conversation memory per user**: the memory is keyed on the chat session *and* the user, so after `/logout` and a login with another account in the same chat, the new user never sees the previous conversation.
+- **No destructive action through the AI**: deleting an account requires the `/delete_account <password>` command, which bypasses the assistant entirely.
 - **Narrow assistant**: the system prompt limits the assistant to newsletter settings and tells it to ignore requests to change its rules or play another role.
 - **Least privilege**: workflows connect with `APP_DB_USER`, which can read and write data but cannot change the schema or the topic list.
 - **No password in the execution history**: `main_chat`, `auth` and `user_tools` do not save their executions, since chat messages may contain passwords. n8n flags these runs as deleted right away and purges them from its database on its next pruning cycle. To debug, temporarily set **Workflow settings → Save successful production executions** back to *Save*.

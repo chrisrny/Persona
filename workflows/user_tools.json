@@ -33,7 +33,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Validates and normalizes the tool call. The LLM only provides `value` and\n// `timezone`; `user_id` comes from the verified session in main_chat.\nconst UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst SLUG_RE = /^[a-z][a-z0-9_]*$/;\nconst EMAIL_RE = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\nconst TZ_RE = /^(UTC|[A-Za-z]+(\\/[A-Za-z0-9_+\\-]+){1,2})$/;\n\nconst action = String($json.action ?? '');\nconst userId = String($json.user_id ?? '');\nconst value = String($json.value ?? '').trim();\nconst timezone = String($json.timezone ?? '').trim();\n\nconst ok = (extra = {}) => ({ json: { ok: true, action, user_id: userId, ...extra } });\nconst fail = (error) => ({ json: { ok: false, action, error } });\n\nif (!UUID_RE.test(userId)) return fail('Not authenticated.');\n\nswitch (action) {\n  case 'get_preferences':\n    return ok();\n\n  case 'set_topics': {\n    const topics = [...new Set(value.toLowerCase().split(/[\\s,;]+/).filter(Boolean))];\n    if (topics.length === 0) return fail('No topic given.');\n    if (topics.length > 20 || topics.some((t) => t.length > 32 || !SLUG_RE.test(t))) {\n      return fail('Invalid topics. Use comma-separated topic slugs.');\n    }\n    return ok({ topics: JSON.stringify(topics) });\n  }\n\n  case 'set_keywords': {\n    const keywords = [...new Set(\n      value.split(/[,;\\n]+/)\n        .map((k) => k.replace(/[\\u0000-\\u001f\\u007f]/g, '').trim())\n        .filter(Boolean)\n    )];\n    if (keywords.length > 10) return fail('Too many keywords (max 10).');\n    if (keywords.some((k) => k.length > 40)) return fail('Each keyword must be at most 40 characters.');\n    return ok({ keywords: JSON.stringify(keywords) });\n  }\n\n  case 'set_email': {\n    const email = value.toLowerCase();\n    if (email.length > 254 || !EMAIL_RE.test(email)) return fail('Invalid email address.');\n    return ok({ email });\n  }\n\n  case 'set_schedule': {\n    // Accepts \"8\", \"08:00\", \"8h\", \"8h30\", \"8.30\"\n    const m = value.match(/^(\\d{1,2})\\s*(?:[:hH.]\\s*(\\d{2})?)?$/);\n    if (!m) return fail('Invalid time. Use the 24h HH:MM format, e.g. 08:00.');\n    const hours = Number(m[1]);\n    const minutes = Number(m[2] ?? 0);\n    if (hours > 23 || minutes > 59) return fail('Invalid time. Use the 24h HH:MM format, e.g. 08:00.');\n    if (timezone && !TZ_RE.test(timezone)) return fail('Invalid timezone. Use an IANA name such as Europe/Paris.');\n    const sendTime = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');\n    return ok({ send_time: sendTime, timezone });\n  }\n\n  default:\n    return fail('Unknown action.');\n}"
+        "jsCode": "// Validates and normalizes the tool call. The LLM only provides `value` and\n// `timezone`; `user_id` comes from the verified session in main_chat.\nconst UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst SLUG_RE = /^[a-z][a-z0-9_]*$/;\nconst EMAIL_RE = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\nconst TZ_RE = /^(UTC|[A-Za-z]+(\\/[A-Za-z0-9_+\\-]+){1,2})$/;\n\nconst action = String($json.action ?? '');\nconst userId = String($json.user_id ?? '');\nconst value = String($json.value ?? '').trim();\nconst timezone = String($json.timezone ?? '').trim();\n\nconst ok = (extra = {}) => ({ json: { ok: true, action, user_id: userId, ...extra } });\nconst fail = (error) => ({ json: { ok: false, action, error } });\n\nif (!UUID_RE.test(userId)) return fail('Not authenticated.');\n\nswitch (action) {\n  case 'get_preferences':\n  case 'get_my_data':\n  case 'pause_newsletter':\n  case 'resume_newsletter':\n    return ok();\n\n  case 'set_topics': {\n    const topics = [...new Set(value.toLowerCase().split(/[\\s,;]+/).filter(Boolean))];\n    if (topics.length === 0) return fail('No topic given.');\n    if (topics.length > 20 || topics.some((t) => t.length > 32 || !SLUG_RE.test(t))) {\n      return fail('Invalid topics. Use comma-separated topic slugs.');\n    }\n    return ok({ topics: JSON.stringify(topics) });\n  }\n\n  case 'set_keywords': {\n    const keywords = [...new Set(\n      value.split(/[,;\\n]+/)\n        .map((k) => k.replace(/[\\u0000-\\u001f\\u007f]/g, '').trim())\n        .filter(Boolean)\n    )];\n    if (keywords.length > 10) return fail('Too many keywords (max 10).');\n    if (keywords.some((k) => k.length > 40)) return fail('Each keyword must be at most 40 characters.');\n    return ok({ keywords: JSON.stringify(keywords) });\n  }\n\n  case 'set_email': {\n    const email = value.toLowerCase();\n    if (email.length > 254 || !EMAIL_RE.test(email)) return fail('Invalid email address.');\n    return ok({ email });\n  }\n\n  case 'set_schedule': {\n    // Accepts \"8\", \"08:00\", \"8h\", \"8h30\", \"8.30\"\n    const m = value.match(/^(\\d{1,2})\\s*(?:[:hH.]\\s*(\\d{2})?)?$/);\n    if (!m) return fail('Invalid time. Use the 24h HH:MM format, e.g. 08:00.');\n    const hours = Number(m[1]);\n    const minutes = Number(m[2] ?? 0);\n    if (hours > 23 || minutes > 59) return fail('Invalid time. Use the 24h HH:MM format, e.g. 08:00.');\n    if (timezone && !TZ_RE.test(timezone)) return fail('Invalid timezone. Use an IANA name such as Europe/Paris.');\n    const sendTime = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');\n    return ok({ send_time: sendTime, timezone });\n  }\n\n  default:\n    return fail('Unknown action.');\n}"
       },
       "id": "5ca85578-564a-5a5a-a39f-900ee74d44a1",
       "name": "Validate input",
@@ -201,6 +201,78 @@
               },
               "renameOutput": true,
               "outputKey": "set_schedule"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "19918dd9-217c-553c-a10d-3b41675629a8",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "get_my_data",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "get_my_data"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8b327482-440e-577c-a326-42256ea07957",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "pause_newsletter",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "pause_newsletter"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7c98dc54-14ea-52ed-b015-69b7feb40a16",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "resume_newsletter",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "resume_newsletter"
             }
           ]
         },
@@ -247,7 +319,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Turns the query result into a short answer for the agent.\nconst action = $('Validate input').item.json.action;\nconst r = $json;\nconst list = (a) => (Array.isArray(a) && a.length ? a.join(', ') : 'none');\n\nswitch (action) {\n  case 'get_preferences':\n    return { json: {\n      ok: true,\n      username: r.username,\n      email: r.email ?? 'not set',\n      topics: list(r.topics),\n      keywords: list(r.keywords),\n      send_time: r.send_time ?? 'not set',\n      timezone: r.timezone,\n      newsletter_active: r.active,\n      available_topics: list(r.available_topics),\n    } };\n\n  case 'set_topics': {\n    if (!r.topics || r.topics.length === 0) {\n      return { json: { ok: false, error: 'None of these topics exist. Nothing was changed.', available_topics: list(r.available_topics) } };\n    }\n    const json = { ok: true, message: 'Topics saved: ' + list(r.topics) + '.' };\n    if (r.unknown && r.unknown.length) json.ignored_unknown_topics = list(r.unknown);\n    return { json };\n  }\n\n  case 'set_keywords':\n    return { json: { ok: true, message: 'Keywords saved: ' + list(r.keywords) + '.' } };\n\n  case 'set_email':\n    return { json: { ok: true, message: 'Email saved: ' + r.email + '.' } };\n\n  case 'set_schedule':\n    if (!r.send_time) {\n      return { json: { ok: false, error: 'Unknown timezone. Use an IANA name such as Europe/Paris. Nothing was changed.' } };\n    }\n    return { json: { ok: true, message: 'Newsletter scheduled every day at ' + r.send_time + ' (' + r.timezone + ').' } };\n}\nreturn { json: { ok: false, error: 'Unknown action.' } };"
+        "jsCode": "// Turns the query result into a short answer for the agent.\nconst action = $('Validate input').item.json.action;\nconst r = $json;\nconst list = (a) => (Array.isArray(a) && a.length ? a.join(', ') : 'none');\n\nswitch (action) {\n  case 'get_preferences':\n    return { json: {\n      ok: true,\n      username: r.username,\n      email: r.email ?? 'not set',\n      topics: list(r.topics),\n      keywords: list(r.keywords),\n      send_time: r.send_time ?? 'not set',\n      timezone: r.timezone,\n      newsletter_active: r.active,\n      available_topics: list(r.available_topics),\n    } };\n\n  case 'set_topics': {\n    if (!r.topics || r.topics.length === 0) {\n      return { json: { ok: false, error: 'None of these topics exist. Nothing was changed.', available_topics: list(r.available_topics) } };\n    }\n    const json = { ok: true, message: 'Topics saved: ' + list(r.topics) + '.' };\n    if (r.unknown && r.unknown.length) json.ignored_unknown_topics = list(r.unknown);\n    return { json };\n  }\n\n  case 'set_keywords':\n    return { json: { ok: true, message: 'Keywords saved: ' + list(r.keywords) + '.' } };\n\n  case 'set_email':\n    return { json: { ok: true, message: 'Email saved: ' + r.email + '.' } };\n\n  case 'set_schedule':\n    if (!r.send_time) {\n      return { json: { ok: false, error: 'Unknown timezone. Use an IANA name such as Europe/Paris. Nothing was changed.' } };\n    }\n    return { json: { ok: true, message: 'Newsletter scheduled every day at ' + r.send_time + ' (' + r.timezone + ').' } };\n\n  case 'get_my_data':\n    return { json: {\n      ok: true,\n      note: 'This is all the personal data Persona stores about you. Your password is only stored as an irreversible hash.',\n      username: r.username,\n      email: r.email ?? 'not set',\n      topics: list(r.topics),\n      keywords: list(r.keywords),\n      send_time: r.send_time ?? 'not set',\n      timezone: r.timezone,\n      newsletter_active: r.active,\n      role: r.role,\n      consent_given_at: r.consent_at,\n      account_created_at: r.created_at,\n      newsletters_received: r.newsletters_received,\n      last_newsletter_at: r.last_newsletter_at ?? 'never',\n      active_sessions: r.active_sessions,\n    } };\n\n  case 'pause_newsletter':\n    return { json: { ok: true, message: 'Newsletter paused: no more emails will be sent until you resume it. Your settings are kept.' } };\n\n  case 'resume_newsletter': {\n    const missing = [];\n    if (!r.email) missing.push('an email address');\n    if (!r.send_time) missing.push('a delivery time');\n    const json = { ok: true, message: 'Newsletter resumed.' };\n    if (missing.length) json.warning = 'Nothing will be sent until you set ' + missing.join(' and ') + '.';\n    return { json };\n  }\n}\nreturn { json: { ok: false, error: 'Unknown action.' } };"
       },
       "id": "17cd9c29-fa1e-5889-a8fc-4216576e7436",
       "name": "Format result",
@@ -373,6 +445,75 @@
         }
       },
       "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT u.username, u.email, u.keywords,\n       to_char(u.send_time, 'HH24:MI') AS send_time, u.timezone, u.active, u.role,\n       to_char(u.consent_at AT TIME ZONE u.timezone, 'YYYY-MM-DD HH24:MI') AS consent_at,\n       to_char(u.created_at AT TIME ZONE u.timezone, 'YYYY-MM-DD HH24:MI') AS created_at,\n       COALESCE((SELECT array_agg(ut.topic_slug ORDER BY ut.topic_slug)\n                 FROM user_topics ut WHERE ut.user_id = u.id), '{}') AS topics,\n       (SELECT count(*) FROM newsletters n WHERE n.user_id = u.id)::int AS newsletters_received,\n       (SELECT to_char(max(n.sent_at) AT TIME ZONE u.timezone, 'YYYY-MM-DD HH24:MI')\n          FROM newsletters n WHERE n.user_id = u.id) AS last_newsletter_at,\n       (SELECT count(*) FROM sessions s\n         WHERE s.user_id = u.id AND s.expires_at > now())::int AS active_sessions\nFROM users u\nWHERE u.id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id ] }}"
+        }
+      },
+      "id": "5718b8c4-e002-5481-95ed-96c9b352c7f9",
+      "name": "Get all my data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        800
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE users SET active = FALSE\nWHERE id = $1::uuid\nRETURNING active;",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id ] }}"
+        }
+      },
+      "id": "3d2b16f6-1952-5a90-8b11-17adf603e8c8",
+      "name": "Pause newsletter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        960
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE users SET active = TRUE\nWHERE id = $1::uuid\nRETURNING active, email, to_char(send_time, 'HH24:MI') AS send_time, timezone;",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id ] }}"
+        }
+      },
+      "id": "d4eb3cf2-8e02-5258-b659-0e470d889e99",
+      "name": "Resume newsletter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        1120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
     }
   ],
   "connections": {
@@ -452,6 +593,27 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Get all my data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pause newsletter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resume newsletter",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -500,6 +662,39 @@
       ]
     },
     "Save schedule": {
+      "main": [
+        [
+          {
+            "node": "Format result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get all my data": {
+      "main": [
+        [
+          {
+            "node": "Format result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pause newsletter": {
+      "main": [
+        [
+          {
+            "node": "Format result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume newsletter": {
       "main": [
         [
           {

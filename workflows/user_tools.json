@@ -1,0 +1,524 @@
+{
+  "id": "prsnUserTools001",
+  "name": "Persona - user_tools",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "user_id"
+            },
+            {
+              "name": "action"
+            },
+            {
+              "name": "value"
+            },
+            {
+              "name": "timezone"
+            }
+          ]
+        }
+      },
+      "id": "d89898db-4e50-5f02-b35e-6e44dde3f733",
+      "name": "When called by the agent",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Validates and normalizes the tool call. The LLM only provides `value` and\n// `timezone`; `user_id` comes from the verified session in main_chat.\nconst UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst SLUG_RE = /^[a-z][a-z0-9_]*$/;\nconst EMAIL_RE = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\nconst TZ_RE = /^(UTC|[A-Za-z]+(\\/[A-Za-z0-9_+\\-]+){1,2})$/;\n\nconst action = String($json.action ?? '');\nconst userId = String($json.user_id ?? '');\nconst value = String($json.value ?? '').trim();\nconst timezone = String($json.timezone ?? '').trim();\n\nconst ok = (extra = {}) => ({ json: { ok: true, action, user_id: userId, ...extra } });\nconst fail = (error) => ({ json: { ok: false, action, error } });\n\nif (!UUID_RE.test(userId)) return fail('Not authenticated.');\n\nswitch (action) {\n  case 'get_preferences':\n    return ok();\n\n  case 'set_topics': {\n    const topics = [...new Set(value.toLowerCase().split(/[\\s,;]+/).filter(Boolean))];\n    if (topics.length === 0) return fail('No topic given.');\n    if (topics.length > 20 || topics.some((t) => t.length > 32 || !SLUG_RE.test(t))) {\n      return fail('Invalid topics. Use comma-separated topic slugs.');\n    }\n    return ok({ topics: JSON.stringify(topics) });\n  }\n\n  case 'set_keywords': {\n    const keywords = [...new Set(\n      value.split(/[,;\\n]+/)\n        .map((k) => k.replace(/[\\u0000-\\u001f\\u007f]/g, '').trim())\n        .filter(Boolean)\n    )];\n    if (keywords.length > 10) return fail('Too many keywords (max 10).');\n    if (keywords.some((k) => k.length > 40)) return fail('Each keyword must be at most 40 characters.');\n    return ok({ keywords: JSON.stringify(keywords) });\n  }\n\n  case 'set_email': {\n    const email = value.toLowerCase();\n    if (email.length > 254 || !EMAIL_RE.test(email)) return fail('Invalid email address.');\n    return ok({ email });\n  }\n\n  case 'set_schedule': {\n    // Accepts \"8\", \"08:00\", \"8h\", \"8h30\", \"8.30\"\n    const m = value.match(/^(\\d{1,2})\\s*(?:[:hH.]\\s*(\\d{2})?)?$/);\n    if (!m) return fail('Invalid time. Use the 24h HH:MM format, e.g. 08:00.');\n    const hours = Number(m[1]);\n    const minutes = Number(m[2] ?? 0);\n    if (hours > 23 || minutes > 59) return fail('Invalid time. Use the 24h HH:MM format, e.g. 08:00.');\n    if (timezone && !TZ_RE.test(timezone)) return fail('Invalid timezone. Use an IANA name such as Europe/Paris.');\n    const sendTime = String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');\n    return ok({ send_time: sendTime, timezone });\n  }\n\n  default:\n    return fail('Unknown action.');\n}"
+      },
+      "id": "5ca85578-564a-5a5a-a39f-900ee74d44a1",
+      "name": "Validate input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7f9f7379-23bf-5626-861d-cce648a961fa",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b63624c7-1e21-56eb-ba09-ca5d0d29a946",
+      "name": "Is valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e5e01229-b9fd-55f8-98c9-0aca63eb662d",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "get_preferences",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "get_preferences"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "51fb65a1-a7ba-55b2-845d-780b98666d4b",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "set_topics",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "set_topics"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "66ba3286-ae58-5b2e-a8da-62abb433fa16",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "set_keywords",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "set_keywords"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "67169958-0cfb-5d6d-9d79-bb2da5907a80",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "set_email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "set_email"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "f0546e42-6265-5fbf-9893-a238740a4baf",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "set_schedule",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "set_schedule"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "68b6c421-92a2-57c3-81d7-203f55ade1d2",
+      "name": "Route action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fcfd6f9a-ca01-52ba-960b-09e2cad33e8b",
+              "name": "ok",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "de2ee571-f84d-5ac9-bb2b-a4e68101569a",
+              "name": "error",
+              "value": "={{ $json.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "db792a7a-6a3e-5efd-8501-9f1a2fb137bb",
+      "name": "Invalid input reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        900,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Turns the query result into a short answer for the agent.\nconst action = $('Validate input').item.json.action;\nconst r = $json;\nconst list = (a) => (Array.isArray(a) && a.length ? a.join(', ') : 'none');\n\nswitch (action) {\n  case 'get_preferences':\n    return { json: {\n      ok: true,\n      username: r.username,\n      email: r.email ?? 'not set',\n      topics: list(r.topics),\n      keywords: list(r.keywords),\n      send_time: r.send_time ?? 'not set',\n      timezone: r.timezone,\n      newsletter_active: r.active,\n      available_topics: list(r.available_topics),\n    } };\n\n  case 'set_topics': {\n    if (!r.topics || r.topics.length === 0) {\n      return { json: { ok: false, error: 'None of these topics exist. Nothing was changed.', available_topics: list(r.available_topics) } };\n    }\n    const json = { ok: true, message: 'Topics saved: ' + list(r.topics) + '.' };\n    if (r.unknown && r.unknown.length) json.ignored_unknown_topics = list(r.unknown);\n    return { json };\n  }\n\n  case 'set_keywords':\n    return { json: { ok: true, message: 'Keywords saved: ' + list(r.keywords) + '.' } };\n\n  case 'set_email':\n    return { json: { ok: true, message: 'Email saved: ' + r.email + '.' } };\n\n  case 'set_schedule':\n    if (!r.send_time) {\n      return { json: { ok: false, error: 'Unknown timezone. Use an IANA name such as Europe/Paris. Nothing was changed.' } };\n    }\n    return { json: { ok: true, message: 'Newsletter scheduled every day at ' + r.send_time + ' (' + r.timezone + ').' } };\n}\nreturn { json: { ok: false, error: 'Unknown action.' } };"
+      },
+      "id": "17cd9c29-fa1e-5889-a8fc-4216576e7436",
+      "name": "Format result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1160,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT u.username, u.email, u.keywords,\n       to_char(u.send_time, 'HH24:MI') AS send_time, u.timezone, u.active,\n       COALESCE((SELECT array_agg(ut.topic_slug ORDER BY ut.topic_slug)\n                 FROM user_topics ut WHERE ut.user_id = u.id), '{}') AS topics,\n       (SELECT array_agg(slug ORDER BY slug) FROM topics) AS available_topics\nFROM users u\nWHERE u.id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id ] }}"
+        }
+      },
+      "id": "1ac32636-5567-5918-8273-9211462da142",
+      "name": "Get preferences",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH requested AS (\n  SELECT DISTINCT jsonb_array_elements_text($2::jsonb) AS slug\n), valid AS (\n  SELECT r.slug FROM requested r JOIN topics t ON t.slug = r.slug\n), removed AS (\n  DELETE FROM user_topics\n  WHERE user_id = $1::uuid\n    AND EXISTS (SELECT 1 FROM valid)\n    AND topic_slug NOT IN (SELECT slug FROM valid)\n), added AS (\n  INSERT INTO user_topics (user_id, topic_slug)\n  SELECT $1::uuid, slug FROM valid\n  ON CONFLICT DO NOTHING\n)\nSELECT\n  COALESCE((SELECT array_agg(slug ORDER BY slug) FROM valid), '{}') AS topics,\n  COALESCE((SELECT array_agg(slug ORDER BY slug) FROM requested\n            WHERE slug NOT IN (SELECT slug FROM valid)), '{}') AS unknown,\n  (SELECT array_agg(slug ORDER BY slug) FROM topics) AS available_topics;",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id, $json.topics ] }}"
+        }
+      },
+      "id": "0d20333b-16af-501f-8d98-4fc7f292dde9",
+      "name": "Save topics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        160
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE users\nSET keywords = ARRAY(SELECT jsonb_array_elements_text($2::jsonb))\nWHERE id = $1::uuid\nRETURNING keywords;",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id, $json.keywords ] }}"
+        }
+      },
+      "id": "26f245fe-7c63-59e1-bf65-e4b663224027",
+      "name": "Save keywords",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE users SET email = $2\nWHERE id = $1::uuid\nRETURNING email;",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id, $json.email ] }}"
+        }
+      },
+      "id": "768bf397-7586-58c4-a56b-600ded765dd9",
+      "name": "Save email",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        480
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE users\nSET send_time = $2::time,\n    timezone = COALESCE(NULLIF($3, ''), timezone)\nWHERE id = $1::uuid\n  AND (NULLIF($3, '') IS NULL OR EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $3))\nRETURNING to_char(send_time, 'HH24:MI') AS send_time, timezone;",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id, $json.send_time, $json.timezone ] }}"
+        }
+      },
+      "id": "77982a89-9825-50fb-9572-b228040e3ef9",
+      "name": "Save schedule",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        900,
+        640
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      },
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "When called by the agent": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Is valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is valid?": {
+      "main": [
+        [
+          {
+            "node": "Route action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Invalid input reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route action": {
+      "main": [
+        [
+          {
+            "node": "Get preferences",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save topics",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save keywords",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get preferences": {
+      "main": [
+        [
+          {
+            "node": "Format result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save topics": {
+      "main": [
+        [
+          {
+            "node": "Format result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save keywords": {
+      "main": [
+        [
+          {
+            "node": "Format result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save email": {
+      "main": [
+        [
+          {
+            "node": "Format result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save schedule": {
+      "main": [
+        [
+          {
+            "node": "Format result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {},
+  "tags": []
+}

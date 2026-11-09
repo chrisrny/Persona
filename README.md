@@ -51,6 +51,18 @@ Users talk to a single chat interface to create an account, choose their topics 
 
 > To reset everything (database included): `docker compose down -v`, then `docker compose up -d`.
 
+> **The database schema and the `APP_DB_USER` role are only created on the very first start**, when the Postgres volume is empty. If you change `POSTGRES_*` or `APP_DB_*` in `.env` afterwards, or if the first start failed, recreate the database volume (this deletes Persona's data, not your n8n account):
+>
+> ```bash
+> docker compose down
+> docker volume rm persona_postgres_data   # name shown by: docker volume ls
+> docker compose up -d
+> docker compose exec n8n sh /scripts/import.sh
+> docker compose restart n8n
+> ```
+>
+> If the chat answers "Error in workflow" with `password authentication failed for user "persona_app"`, this is the cause.
+
 ### LLM setup
 
 Persona uses a local model served by Ollama. The model must support tool calling.
@@ -91,10 +103,13 @@ docker compose restart n8n
 
 The script creates the n8n credentials from your `.env`, imports every file of `workflows/` and publishes them. It can be run again after pulling new versions of the workflows (existing ones are overwritten).
 
+> After the restart, n8n needs about 20 seconds to switch to the newly published versions. Messages sent right away may still be handled by the previous version.
+
 | Workflow | Role |
 | --- | --- |
-| `Persona - main_chat` | Chat entry point: session check, routing |
+| `Persona - main_chat` | Chat entry point: session check, routing, AI agent |
 | `Persona - auth` | Sign-up, login and sessions (sub-workflow, no LLM involved) |
+| `Persona - user_tools` | The only actions the agent can perform on user data: read and update the user's preferences (sub-workflow) |
 
 ## Credentials
 
@@ -123,6 +138,24 @@ Open the chat at <http://localhost:5678/webhook/b6f1c6d2-6a51-4c1e-9a43-7d2f0e3c
 - A session lasts 2 hours after your last message.
 - After 5 failed logins, the account is locked for 15 minutes.
 
+Once logged in, just talk to the assistant in natural language, for example:
+
+- *"I'm interested in tech, AI and climate news"*
+- *"Add the keywords SpaceX and electric cars"*
+- *"Send it to me at me@example.com every day at 8:30"*
+- *"I live in New York"* (timezone `America/New_York`)
+- *"What are my current settings?"*
+
+| Setting | Accepted values |
+| --- | --- |
+| Topics | `tech`, `ai`, `science`, `economy`, `sport`, `culture`, `health`, `environment`, `world` (the assistant maps your words to this list) |
+| Keywords | Up to 10, 40 characters each |
+| Email | A valid email address |
+| Delivery time | Every day at `HH:MM` (24h), in your timezone |
+| Timezone | An [IANA name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones), `Europe/Paris` by default |
+
+The assistant runs on the local Ollama model, so the first answer can take a few seconds while the model loads.
+
 ## Testing a scheduled newsletter
 
 _TODO_
@@ -150,8 +183,11 @@ _TODO_
 - **Passwords** are hashed with bcrypt (`pgcrypto`) and never stored or returned in clear text.
 - **Brute force**: 5 failed logins lock the account for 15 minutes; error messages never reveal whether a username exists.
 - **SQL injection**: every query uses bound parameters (`$1`, `$2`...).
+- **The AI cannot reach other users' data.** The agent's tools never take a user id: `main_chat` injects the id of the authenticated session into every tool call, so even a manipulated model can only read or change the current user's settings. Every value the model provides is validated again (format, length, existing topic, real IANA timezone) before reaching the database.
+- **Separate conversation memory per user**: the memory is keyed on the chat session *and* the user, so after `/logout` and a login with another account in the same chat, the new user never sees the previous conversation.
+- **Narrow assistant**: the system prompt limits the assistant to newsletter settings and tells it to ignore requests to change its rules or play another role.
 - **Least privilege**: workflows connect with `APP_DB_USER`, which can read and write data but cannot change the schema or the topic list.
-- **No password in the execution history**: `main_chat` and `auth` do not save their executions, since chat messages may contain passwords. n8n flags these runs as deleted right away and purges them from its database on its next pruning cycle. To debug, temporarily set **Workflow settings → Save successful production executions** back to *Save*.
+- **No password in the execution history**: `main_chat`, `auth` and `user_tools` do not save their executions, since chat messages may contain passwords. n8n flags these runs as deleted right away and purges them from its database on its next pruning cycle. To debug, temporarily set **Workflow settings → Save successful production executions** back to *Save*.
 
 ## Project structure
 

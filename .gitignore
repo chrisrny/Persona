@@ -34,3 +34,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Personal notes (not shared)
+notes/
+*.pdf

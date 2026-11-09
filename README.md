@@ -180,7 +180,7 @@ All data lives in the `persona` Postgres database:
 
 ## GDPR
 
-Persona is designed to be usable in the European Union.
+Persona is designed to be usable in the European Union. Full details (data inventory, retention, processors, limits): [docs/rgpd.md](docs/rgpd.md).
 
 | Principle | How Persona applies it |
 | --- | --- |
@@ -199,6 +199,8 @@ Account deletion is a plain chat command handled by n8n nodes and SQL, never by 
 News articles are not personal data and are kept after an account is deleted. The assistant's short-term conversation memory lives in the n8n process only (last 10 messages per session) and is cleared when n8n restarts.
 
 ## Security
+
+Threats, tests and known limits are documented in [docs/security-audit.md](docs/security-audit.md).
 
 - **Authentication happens before the AI.** Sign-up, login and session checks are plain n8n nodes and SQL queries: the LLM never sees credentials and cannot be talked into skipping authentication.
 - **Passwords** are hashed with bcrypt (`pgcrypto`) and never stored or returned in clear text.
@@ -224,7 +226,9 @@ persona/
 │   └── app-role.sh     # Least-privilege role used by n8n
 ├── scripts/
 │   └── import.sh       # Imports credentials and workflows into n8n
-├── docs/               # Architecture, GDPR, security audit
+├── docs/
+│   ├── rgpd.md         # GDPR: data, retention, rights
+│   └── security-audit.md  # Threats, tests, known limits
 ├── keynote/            # Presentation material
 ├── docker-compose.yml  # n8n + Postgres
 └── .env.example        # Environment template

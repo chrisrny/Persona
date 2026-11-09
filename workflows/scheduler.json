@@ -1,0 +1,122 @@
+{
+  "id": "prsnScheduler001",
+  "name": "Persona - scheduler",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "b2d1f6e3-2a4c-4d7b-8f12-6c8e3a9b0001",
+      "name": "Toutes les minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Utilisateurs dont le créneau vient d'arriver dans LEUR fuseau (fenêtre de 15 min\n-- pour rattraper un retard d'exécution) et qui n'ont rien reçu aujourd'hui.\n-- On les « réserve » tout de suite (last_sent_at = now()) : une exécution suivante,\n-- lancée pendant que la newsletter part, ne peut pas les reprendre (anti double envoi).\nUPDATE users u\nSET last_sent_at = now()\nWHERE u.active\n  AND u.email IS NOT NULL\n  AND u.send_time IS NOT NULL\n  AND (now() AT TIME ZONE u.timezone)::time - u.send_time\n      BETWEEN interval '0 minutes' AND interval '15 minutes'\n  AND (u.last_sent_at IS NULL\n       OR (u.last_sent_at AT TIME ZONE u.timezone)::date < (now() AT TIME ZONE u.timezone)::date)\nRETURNING u.id AS user_id;",
+        "options": {}
+      },
+      "id": "b2d1f6e3-2a4c-4d7b-8f12-6c8e3a9b0002",
+      "name": "Utilisateurs à servir",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "prsnSendNewsl001",
+          "mode": "list",
+          "cachedResultName": "Persona - send_newsletter"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $json.user_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "b2d1f6e3-2a4c-4d7b-8f12-6c8e3a9b0003",
+      "name": "Envoyer la newsletter",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Toutes les minutes": {
+      "main": [
+        [
+          {
+            "node": "Utilisateurs à servir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Utilisateurs à servir": {
+      "main": [
+        [
+          {
+            "node": "Envoyer la newsletter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {},
+  "tags": []
+}

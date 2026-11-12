@@ -157,7 +157,7 @@ Once logged in, just talk to the assistant in natural language, for example:
 | Setting | Accepted values |
 | --- | --- |
 | Topics | `tech`, `ai`, `science`, `economy`, `sport`, `culture`, `health`, `environment`, `world` (the assistant maps your words to this list) |
-| Keywords | Up to 10, 40 characters each |
+| Keywords | Up to 10, 40 characters each, no links or website addresses |
 | Email | A valid email address |
 | Delivery time | Every day at `HH:MM` (24h), in your timezone. The newsletter is daily |
 | Timezone | An [IANA name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones), `Europe/Paris` by default |
@@ -251,6 +251,8 @@ Threats, tests and known limits are documented in [docs/security-audit.md](docs/
 - **No destructive action through the AI**: deleting an account requires the `/delete_account <password>` command, which bypasses the assistant entirely.
 - **Message limits**: before anything else, `main_chat` rejects empty messages and messages over 1,000 characters, and applies rate limits (20 messages per minute per chat session, 200 per minute for the whole instance, to protect the local model).
 - **No technical details in errors**: if the database or the language model fails, the user gets a generic message ("something went wrong" / "the assistant is not available right now") instead of an n8n error. `/logout` and `/delete_account` keep working when the model is down.
+- **Model overload limits**: the assistant's answers are capped at 512 tokens and 6 tool steps per message; the newsletter volume (one per day, one address, a fixed number of news) is enforced in code and SQL, never chosen by the model.
+- **Curated sources only**: news only come from the fixed list of RSS feeds in `fetch_news`. Users cannot add a source, and keywords cannot contain links or website addresses.
 - **Prompt-injection resistant assistant**: the system prompt treats user messages and tool results as data, never as instructions, refuses to reveal its instructions and cannot switch accounts. Even if the model were fooled, it has no tool able to reach another user or delete an account.
 - **Narrow assistant**: the system prompt limits the assistant to newsletter settings and tells it to ignore requests to change its rules or play another role.
 - **Least privilege**: workflows connect with `APP_DB_USER`, which can read and write data but cannot change the schema or the topic list.

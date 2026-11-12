@@ -1,6 +1,7 @@
 {
   "id": "prsnSendNewsl001",
   "name": "Persona - send_newsletter",
+  "active": true,
   "nodes": [
     {
       "parameters": {
@@ -20,38 +21,6 @@
         0,
         0
       ]
-    },
-    {
-      "parameters": {},
-      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0002",
-      "name": "Test manuel",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [
-        0,
-        220
-      ]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "-- Dev uniquement : utilisateur de test pour lancer le workflow à la main\nSELECT id AS user_id FROM users WHERE username = 'test_chris';",
-        "options": {}
-      },
-      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0003",
-      "name": "Utilisateur de test",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
-      "position": [
-        220,
-        220
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "prsnPostgresCred",
-          "name": "Postgres Persona"
-        }
-      }
     },
     {
       "parameters": {
@@ -124,14 +93,19 @@
       "position": [
         1100,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
         "model": "qwen2.5:7b",
         "options": {
           "temperature": 0.2,
-          "format": "json"
+          "format": "json",
+          "numPredict": 200
         }
       },
       "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0008",
@@ -151,7 +125,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Garde-fous après le classement du LLM :\n// 1. on ne garde que des id présents dans les candidats (le LLM ne peut rien inventer)\n// 2. on écarte les doublons de sujet : titres qui partagent un nom propre (Nvidia, COP31…) ou 2 mots significatifs\n// 3. on écarte les promos ; si la liste est trop courte, on complète avec les news les plus récentes\nconst MAX = 6;\nconst cands = $('Candidats').all().map(i => i.json).filter(n => n.id);\nconst byId = new Map(cands.map(n => [String(n.id), n]));\nlet ids = [];\ntry {\n  // Avec le format JSON d'Ollama, la chaîne renvoie déjà { ids: [...] } ; sinon du texte à parser\n  let out = Array.isArray($json.ids) ? $json : $json.text;\n  if (typeof out === 'string') {\n    const m = out.match(/\\{[\\s\\S]*\\}/);\n    out = JSON.parse(m ? m[0] : out);\n  }\n  ids = ((out && out.ids) || []).map(String);\n} catch (e) {}\n\nconst STOP = new Set(['dans', 'pour', 'avec', 'sans', 'sous', 'plus', 'moins', 'leur', 'leurs', 'cette', 'entre', 'après', 'avant', 'depuis', 'comme', 'mais', 'tout', 'tous', 'nouveau', 'nouvelle', 'deux', 'trois', 'with', 'from', 'that', 'this', 'what', 'have', 'about', 'their', 'will', 'into', 'more', 'over']);\nconst words = (t) => new Set(\n  t.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n    .split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !STOP.has(w) && !/^\\d+$/.test(w))\n);\nconst norm = (w) => w.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\n// Noms propres et sigles : mot en majuscule hors début de titre, tout en capitales, ou lettres + chiffres (COP31)\nconst entities = (t) => new Set(\n  t.split(/[^\\p{L}\\p{N}]+/u).filter((w, i) => w.length >= 3 && (\n    /\\p{L}/u.test(w) && /\\d/.test(w) || /^\\p{Lu}{3,}$/u.test(w) || (i > 0 && /^\\p{Lu}\\p{Ll}/u.test(w))\n  )).map(norm).filter(w => !STOP.has(w))\n);\nconst PROMO = /bon plan|promo|black friday|singles day|soldes|offre|deal|réduction|-\\d+ ?%|\\d+ ?€/i;\n\nconst picked = [];\nconst tryAdd = (n) => {\n  if (!n || picked.length >= MAX || picked.includes(n) || PROMO.test(n.title)) return;\n  const w = words(n.title), e = entities(n.title);\n  const dup = picked.some(p => {\n    const pw = words(p.title), pe = entities(p.title);\n    return [...pw].filter(x => w.has(x)).length >= 2 || [...e].some(x => pw.has(x)) || [...pe].some(x => w.has(x));\n  });\n  if (!dup) picked.push(n);\n};\n[...new Set(ids)].forEach(id => tryAdd(byId.get(id)));\ncands.forEach(tryAdd);\nreturn picked.map(n => ({ json: n }));"
+        "jsCode": "// Garde-fous après le classement du LLM :\n// 1. on ne garde que des id présents dans les candidats (le LLM ne peut rien inventer)\n// 2. on écarte les doublons de sujet : titres qui partagent un nom propre (Nvidia, COP31…) ou 2 mots significatifs\n// 3. on écarte les promos ; si la liste est trop courte, on complète avec les news les plus récentes\nconst MAX = 6;\nconst cands = $('Candidats').all().map(i => i.json).filter(n => n.id);\nconst byId = new Map(cands.map(n => [String(n.id), n]));\nlet ids = [];\ntry {\n  // Avec le format JSON d'Ollama, la chaîne renvoie déjà { ids: [...] } ; sinon du texte à parser\n  let out = Array.isArray($json.ids) ? $json : $json.text;\n  if (typeof out === 'string') {\n    const m = out.match(/\\{[\\s\\S]*\\}/);\n    out = JSON.parse(m ? m[0] : out);\n  }\n  ids = ((out && out.ids) || []).map(String);\n} catch (e) {}\n\nconst STOP = new Set(['dans', 'pour', 'avec', 'sans', 'sous', 'plus', 'moins', 'leur', 'leurs', 'cette', 'entre', 'après', 'avant', 'depuis', 'comme', 'mais', 'tout', 'tous', 'nouveau', 'nouvelle', 'deux', 'trois', 'with', 'from', 'that', 'this', 'what', 'have', 'about', 'their', 'will', 'into', 'more', 'over']);\nconst words = (t) => new Set(\n  t.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n    .split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !STOP.has(w) && !/^\\d+$/.test(w))\n);\nconst norm = (w) => w.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\n// Noms propres et sigles : mot en majuscule hors début de titre, tout en capitales, ou lettres + chiffres (COP31)\nconst entities = (t) => new Set(\n  t.split(/[^\\p{L}\\p{N}]+/u).filter((w, i) => w.length >= 3 && (\n    /\\p{L}/u.test(w) && /\\d/.test(w) || /^\\p{Lu}{3,}$/u.test(w) || (i > 0 && /^\\p{Lu}\\p{Ll}/u.test(w))\n  )).map(norm).filter(w => !STOP.has(w))\n);\nconst PROMO = /bon plan|promo|black friday|singles day|soldes|offre|deal|réduction|à prix|prix (fou|cassé|mini|choc|bas)|-\\d+ ?%|\\d+ ?€/i;\n\nconst picked = [];\nconst tryAdd = (n) => {\n  if (!n || picked.length >= MAX || picked.includes(n) || PROMO.test(n.title)) return;\n  const w = words(n.title), e = entities(n.title);\n  const dup = picked.some(p => {\n    const pw = words(p.title), pe = entities(p.title);\n    return [...pw].filter(x => w.has(x)).length >= 2 || [...e].some(x => pw.has(x)) || [...pe].some(x => w.has(x));\n  });\n  if (!dup) picked.push(n);\n};\n[...new Set(ids)].forEach(id => tryAdd(byId.get(id)));\ncands.forEach(tryAdd);\nreturn picked.map(n => ({ json: n }));"
       },
       "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0009",
       "name": "Top 6",
@@ -187,14 +161,19 @@
       "position": [
         1880,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
         "model": "qwen2.5:7b",
         "options": {
           "temperature": 0.3,
-          "format": "json"
+          "format": "json",
+          "numPredict": 1000
         }
       },
       "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0012",
@@ -214,7 +193,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Assemble l'email : news retenues + résumés du LLM (avec repli sur la description)\nconst user = $('Utilisateur').first().json;\nconst news = $('Top 6').all().map(i => i.json);\n\nlet summaries = {};\ntry {\n  let out = Array.isArray($json.summaries) ? $json : $json.text;\n  if (typeof out === 'string') {\n    const m = out.match(/\\{[\\s\\S]*\\}/);\n    out = JSON.parse(m ? m[0] : out);\n  }\n  for (const s of (out && out.summaries) || []) summaries[String(s.id)] = String(s.summary || '');\n} catch (e) {}\n\n// Le résumé vient d'un LLM nourri par du contenu externe : on le borne (pas d'URL, 350 caractères max)\nconst clean = (s) => s.replace(/https?:\\/\\/\\S+|www\\.\\S+/gi, '').replace(/\\s+/g, ' ').trim().slice(0, 350);\nconst fallback = (n) => (n.description || '').replace(/\\s+/g, ' ').trim().slice(0, 250);\n\nconst date = DateTime.now().setZone(user.timezone || 'Europe/Paris').setLocale('fr').toFormat('cccc d LLLL');\nconst blocks = news.map((n, i) => {\n  const summary = clean(summaries[String(n.id)] || '') || fallback(n);\n  return `${i + 1}. ${n.title}\\n${summary}\\nSource : ${n.source}\\n${n.url}`;\n});\n\nconst text = [\n  `Bonjour ${user.username},`,\n  '',\n  `Voici ta sélection Persona du ${date} : ${news.length} news choisies pour toi.`,\n  '',\n  blocks.join('\\n\\n'),\n  '',\n  '--',\n  'Tu reçois cet email parce que tu es inscrit à Persona.',\n  'Pour changer tes sujets, ton horaire ou te désinscrire, il suffit de le demander dans le chat Persona.',\n].join('\\n');\n\nreturn [{ json: {\n  user_id: user.id,\n  to: user.email,\n  subject: `Ta newsletter Persona du ${date}`,\n  text,\n  news_ids: news.map(n => n.id),\n} }];"
+        "jsCode": "// Assemble l'email en deux versions (HTML + texte de secours) :\n// news retenues + résumés du LLM (avec repli sur la description)\nconst user = $('Utilisateur').first().json;\nconst news = $('Top 6').all().map(i => i.json);\n\nlet summaries = {};\ntry {\n  let out = Array.isArray($json.summaries) ? $json : $json.text;\n  if (typeof out === 'string') {\n    const m = out.match(/\\{[\\s\\S]*\\}/);\n    out = JSON.parse(m ? m[0] : out);\n  }\n  for (const s of (out && out.summaries) || []) summaries[String(s.id)] = String(s.summary || '');\n} catch (e) {}\n\n// Le résumé vient d'un LLM nourri par du contenu externe : on le borne (pas d'URL, 350 caractères max)\nconst clean = (s) => s.replace(/https?:\\/\\/\\S+|www\\.\\S+/gi, '').replace(/\\s+/g, ' ').trim().slice(0, 350);\nconst fallback = (n) => (n.description || '').replace(/\\s+/g, ' ').trim().slice(0, 250);\nconst items = news.map(n => ({ ...n, summary: clean(summaries[String(n.id)] || '') || fallback(n) }));\n\nconst date = DateTime.now().setZone(user.timezone || 'Europe/Paris').setLocale('fr').toFormat('cccc d LLLL');\nconst subject = `Ta newsletter Persona du ${date}`;\nconst footer = [\n  'Tu reçois cet email parce que tu es inscrit à Persona.',\n  'Pour changer tes sujets, ton horaire ou te désinscrire, il suffit de le demander dans le chat Persona.',\n];\n\n// --- Version texte (clients mail qui n'affichent pas le HTML) ---\nconst text = [\n  `Bonjour ${user.username},`,\n  '',\n  `Voici ta sélection Persona du ${date} : ${items.length} news choisies pour toi.`,\n  '',\n  items.map((n, i) => `${i + 1}. ${n.title}\\n${n.summary}\\nSource : ${n.source}\\n${n.url}`).join('\\n\\n'),\n  '',\n  '--',\n  ...footer,\n].join('\\n');\n\n// --- Version HTML ---\n// Titres, résumés et sources viennent de flux RSS ou du LLM : tout est échappé (pas d'injection HTML)\n// et seuls les liens http(s) sont acceptés.\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\nconst safeUrl = (u) => (/^https?:\\/\\//i.test(u || '') ? esc(u) : '#');\nconst LABELS = { tech: 'Tech', ai: 'IA', science: 'Science', economy: 'Économie', sport: 'Sport', culture: 'Culture', health: 'Santé', environment: 'Environnement', world: 'International' };\nconst dateCap = date.charAt(0).toUpperCase() + date.slice(1);\n\nconst cards = items.map((n, i) => `\n<tr><td style=\"padding:20px 0;border-top:1px solid #e5e7eb;\">\n  <div style=\"font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;\">${i + 1} &middot; ${esc(LABELS[n.topic_slug] || n.topic_slug)} &middot; ${esc(n.source)}</div>\n  <a href=\"${safeUrl(n.url)}\" style=\"font-size:18px;line-height:1.35;font-weight:700;color:#111827;text-decoration:none;\">${esc(n.title)}</a>\n  <p style=\"margin:8px 0 10px;font-size:15px;line-height:1.55;color:#374151;\">${esc(n.summary)}</p>\n  <a href=\"${safeUrl(n.url)}\" style=\"font-size:14px;font-weight:600;color:#4f46e5;text-decoration:none;\">Lire l'article &rarr;</a>\n</td></tr>`).join('');\n\nconst html = `<!DOCTYPE html>\n<html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${esc(subject)}</title></head>\n<body style=\"margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f3f4f6;\"><tr><td align=\"center\" style=\"padding:24px 12px;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;background:#ffffff;border-radius:12px;\">\n<tr><td style=\"padding:28px 32px 8px;\">\n  <div style=\"font-size:22px;font-weight:800;color:#4f46e5;\">Persona</div>\n  <div style=\"font-size:14px;color:#6b7280;margin-top:2px;\">${esc(dateCap)}</div>\n  <p style=\"margin:20px 0 4px;font-size:16px;line-height:1.5;color:#111827;\">Bonjour ${esc(user.username)},<br>voici les ${items.length} news choisies pour toi aujourd'hui.</p>\n</td></tr>\n<tr><td style=\"padding:0 32px;\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">${cards}\n</table></td></tr>\n<tr><td style=\"padding:20px 32px 28px;border-top:1px solid #e5e7eb;font-size:12px;line-height:1.5;color:#9ca3af;\">${footer.map(esc).join('<br>')}</td></tr>\n</table>\n</td></tr></table>\n</body></html>`;\n\nreturn [{ json: {\n  user_id: user.id,\n  to: user.email,\n  subject,\n  text,\n  html,\n  news_ids: items.map(n => n.id),\n} }];"
       },
       "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0013",
       "name": "Composer email",
@@ -231,11 +210,12 @@
         "fromEmail": "Persona <newsletter@persona.local>",
         "toEmail": "={{ $json.to }}",
         "subject": "={{ $json.subject }}",
-        "emailFormat": "text",
+        "emailFormat": "both",
         "text": "={{ $json.text }}",
         "options": {
           "appendAttribution": false
-        }
+        },
+        "html": "={{ $json.html }}"
       },
       "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0014",
       "name": "Envoyer email",
@@ -250,7 +230,9 @@
           "id": "prsnSmtpCred0001",
           "name": "SMTP Persona"
         }
-      }
+      },
+      "webhookId": "d90e45c6-1f96-4d05-864a-c979fd97fedb",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -287,32 +269,46 @@
         2880,
         0
       ]
+    },
+    {
+      "id": "94b8fd35-8ef1-4993-899d-a283e3769fd4",
+      "name": "Libérer le créneau",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2660,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- L'email n'est pas parti : on annule la réservation posée par le scheduler\n-- pour qu'il réessaie à la minute suivante (tant qu'on est dans la fenêtre de 15 min).\nUPDATE users SET last_sent_at = NULL WHERE id = $1::uuid RETURNING id AS user_id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Composer email').item.json.user_id ] }}"
+        }
+      }
+    },
+    {
+      "id": "0083fa2e-a12c-4fda-8e61-26eea012f078",
+      "name": "Résultat (échec)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Sortie du contrat avec le scheduler en cas d'échec d'envoi\nreturn [{ json: { sent: false, news_count: 0 } }];"
+      }
     }
   ],
   "connections": {
     "Appelé par le scheduler": {
-      "main": [
-        [
-          {
-            "node": "Utilisateur",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Test manuel": {
-      "main": [
-        [
-          {
-            "node": "Utilisateur de test",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Utilisateur de test": {
       "main": [
         [
           {
@@ -430,6 +426,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Libérer le créneau",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -454,14 +457,27 @@
           }
         ]
       ]
+    },
+    "Libérer le créneau": {
+      "main": [
+        [
+          {
+            "node": "Résultat (échec)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "executionOrder": "v1",
-    "callerPolicy": "workflowsFromSameOwner"
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
   },
-  "active": false,
-  "pinData": {},
-  "meta": {},
+  "meta": null,
+  "pinData": null,
   "tags": []
 }

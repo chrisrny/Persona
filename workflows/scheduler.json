@@ -1,6 +1,7 @@
 {
   "id": "prsnScheduler001",
   "name": "Persona - scheduler",
+  "active": true,
   "nodes": [
     {
       "parameters": {
@@ -25,7 +26,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "-- Utilisateurs dont le créneau vient d'arriver dans LEUR fuseau (fenêtre de 15 min\n-- pour rattraper un retard d'exécution) et qui n'ont rien reçu aujourd'hui.\n-- On les « réserve » tout de suite (last_sent_at = now()) : une exécution suivante,\n-- lancée pendant que la newsletter part, ne peut pas les reprendre (anti double envoi).\nUPDATE users u\nSET last_sent_at = now()\nWHERE u.active\n  AND u.email IS NOT NULL\n  AND u.send_time IS NOT NULL\n  AND (now() AT TIME ZONE u.timezone)::time - u.send_time\n      BETWEEN interval '0 minutes' AND interval '15 minutes'\n  AND (u.last_sent_at IS NULL\n       OR (u.last_sent_at AT TIME ZONE u.timezone)::date < (now() AT TIME ZONE u.timezone)::date)\nRETURNING u.id AS user_id;",
+        "query": "-- Utilisateurs dont le créneau vient d'arriver dans LEUR fuseau (fenêtre de 15 min, passage\n-- de minuit compris) et qui n'ont rien reçu depuis 20 h.\n-- On les « réserve » tout de suite (last_sent_at = now()) : une exécution suivante, lancée pendant\n-- que la newsletter part, ne peut pas les reprendre (anti double envoi). Si l'email ne part pas,\n-- send_newsletter annule la réservation et l'envoi est retenté à la minute suivante.\n-- Garde-fous : un fuseau invalide est ignoré au lieu de faire planter la requête pour tout le monde,\n-- et 20 utilisateurs max par minute (charge du LLM) ; les suivants passent à la minute d'après.\nUPDATE users u\nSET last_sent_at = now()\nWHERE u.id IN (\n  SELECT c.id\n  FROM users c\n  WHERE c.active\n    AND c.email IS NOT NULL\n    AND c.send_time IS NOT NULL\n    AND (c.last_sent_at IS NULL OR c.last_sent_at < now() - interval '20 hours')\n    AND CASE\n          WHEN c.timezone IN (SELECT name FROM pg_timezone_names)\n          THEN mod(extract(epoch FROM ((now() AT TIME ZONE c.timezone)::time - c.send_time))::int + 86400, 86400) < 900\n          ELSE false\n        END\n  ORDER BY c.send_time\n  LIMIT 20\n  FOR UPDATE OF c SKIP LOCKED\n)\nRETURNING u.id AS user_id;",
         "options": {}
       },
       "id": "b2d1f6e3-2a4c-4d7b-8f12-6c8e3a9b0002",
@@ -82,10 +83,23 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        440,
+        660,
         0
       ],
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Postgres renvoie { success: true } quand aucune ligne ne correspond :\n// on ne garde que les vrais utilisateurs, sinon send_newsletter serait appelé pour rien\nreturn $input.all().filter(i => i.json.user_id);"
+      },
+      "id": "b2d1f6e3-2a4c-4d7b-8f12-6c8e3a9b0004",
+      "name": "Garder les utilisateurs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
     }
   ],
   "connections": {
@@ -104,6 +118,17 @@
       "main": [
         [
           {
+            "node": "Garder les utilisateurs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Garder les utilisateurs": {
+      "main": [
+        [
+          {
             "node": "Envoyer la newsletter",
             "type": "main",
             "index": 0
@@ -113,10 +138,12 @@
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
   },
-  "active": false,
-  "pinData": {},
-  "meta": {},
+  "meta": null,
+  "pinData": null,
   "tags": []
 }

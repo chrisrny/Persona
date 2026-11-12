@@ -1,6 +1,7 @@
 {
   "id": "prsnFetchNews001",
   "name": "Persona - fetch_news",
+  "active": true,
   "nodes": [
     {
       "parameters": {},
@@ -244,10 +245,12 @@
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
   },
-  "active": false,
-  "pinData": {},
   "meta": {},
+  "pinData": {},
   "tags": []
 }

@@ -27,7 +27,7 @@ Not personal data: the news articles (`news`, public RSS content), purged after 
 
 ### What is never stored
 
-- **Passwords in clear text**, anywhere. The `main_chat`, `auth` and `user_tools` workflows do not save their executions, because chat messages can contain a password (`/login`, `/register`, `/delete_account`).
+- **Passwords in clear text**, anywhere. No Persona workflow saves its executions in n8n's history: chat messages can contain a password (`/login`, `/register`, `/delete_account`), and the sending workflows handle usernames and email addresses.
 - **Passwords in the AI**: authentication and account deletion are plain n8n nodes and SQL. The language model never receives a password.
 
 ## 2. Legal basis
@@ -85,7 +85,6 @@ Summary (details and tests in [security-audit.md](security-audit.md)):
 
 - **Privacy policy page and controller contact**: in this project the notice lives in the chat. A real deployment needs a public privacy policy with the controller's identity and contact (and a DPO if required).
 - **Inactive accounts**: there is no automatic deletion yet. A production version would delete or warn accounts inactive for, for example, 12 months.
-- **Execution history of the sending workflows**: `fetch_news`, `send_newsletter` and `scheduler` keep n8n's default execution history, which includes usernames and email addresses (pruned by n8n after 14 days by default). Setting them to *Do not save* like the chat workflows would remove this copy.
 - **Email provider**: replace Gmail with an EU-hosted SMTP provider and sign a data processing agreement.
 - **Data portability** (art. 20): the access answer is structured, but a downloadable JSON export would make portability explicit.
 - **Breach procedure**: document who is notified, and how the supervisory authority (CNIL in France) is informed within 72 hours.

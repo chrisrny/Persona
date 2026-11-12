@@ -72,6 +72,9 @@ Key boundary: **everything the user or an RSS feed sends is untrusted**, includi
 | F2 | On macOS, Docker refused to execute the bind-mounted `db/app-role.sh`: the least-privilege role was never created and n8n could not connect. | The init files are copied into the container without the execute bit, so Postgres reads them instead of executing them. Works on any host. |
 | F3 | After a tool call, the assistant ran again without its link to the original message: the memory key (session + user) became empty and the reply failed. | Expressions use the single message of the execution (`.first()`) instead of item pairing. |
 | F4 | `/delete_account` typed without a password counted as a failed login. | A missing password only shows the usage message. |
+| F5 | The sending workflows kept n8n's execution history, with usernames and email addresses. | `fetch_news`, `send_newsletter` and `scheduler` no longer save their executions. |
+| F6 | `send_newsletter` contained a manual test branch for a development user. | Removed. |
+| F7 | A model failure during a sending lost that user's newsletter for the day, and the sending LLM nodes had no token cap. | Selection and summaries are retried 3 times then fall back (most recent news, RSS descriptions); an email that cannot be sent releases the slot and is retried the next minute; token caps on both nodes (200 and 1,000). |
 
 ## 5. The three attack families
 
@@ -96,7 +99,7 @@ Typical overload request: *"send me a newsletter with every article, every minut
 
 The assistant's prompt also tells it to refuse such requests, but the limits above hold even if it does not.
 
-Gap: the sending-side LLM nodes (`send_newsletter`) have no explicit token cap; their output is short by design (ids, 2-sentence summaries). See L10.
+The sending side is capped too: at most 20 users per scheduler run, token caps on the selection (200) and summaries (1,000), and retries limited to 3.
 
 ### 5.3 Unreliable sources
 
@@ -130,11 +133,8 @@ A 7-billion-parameter local model was chosen to keep every message on the machin
 | L3 | The lock is per account: one common password can be tried against many usernames. | Medium | IP-based limits (L2), stronger password rules. |
 | L4 | No HTTPS: fine on `localhost`, not acceptable on a network. | High if exposed | TLS reverse proxy in front of n8n. |
 | L5 | The assistant's refusal of prompt injections depends on the model and can vary. | Low | By design, a fooled model still has no tool to reach other users, passwords or deletion. |
-| L6 | `fetch_news`, `send_newsletter` and `scheduler` keep n8n's default execution history, which contains usernames and email addresses (pruned after 14 days). | Low | Set them to *Do not save*, as the chat workflows. |
-| L7 | Rate-limit counters live in n8n's workflow static data: reset when the workflow is re-imported, not shared between several n8n instances. | Low | Store counters in Postgres or Redis when scaling. |
-| L8 | `send_newsletter` contains a manual test branch for a development user (`test_chris`). | Low | Remove it before delivery. |
-| L9 | Default `change-me` values in `.env.example`. | High if left as is | README requires replacing them; a production install should refuse to start with them. |
-| L10 | The two LLM nodes of `send_newsletter` have no explicit token cap (`numPredict`). | Low | Add a cap matching their short expected output. |
+| L6 | Rate-limit counters live in n8n's workflow static data: reset when the workflow is re-imported, not shared between several n8n instances. | Low | Store counters in Postgres or Redis when scaling. |
+| L7 | Default `change-me` values in `.env.example`. | High if left as is | README requires replacing them; a production install should refuse to start with them. |
 
 ## 8. Cross attack checklist
 

@@ -240,7 +240,7 @@ News articles are not personal data and are kept after an account is deleted. Th
 
 ## Security
 
-Threats, tests and known limits are documented in [docs/security-audit.md](docs/security-audit.md).
+Threats, tests and known limits are documented in [docs/security-audit.md](docs/security-audit.md). The prompts, their versions and the tests of the AI steps are in [docs/prompts.md](docs/prompts.md) and [docs/ai-tests.md](docs/ai-tests.md).
 
 - **Authentication happens before the AI.** Sign-up, login and session checks are plain n8n nodes and SQL queries: the LLM never sees credentials and cannot be talked into skipping authentication.
 - **Passwords** are hashed with bcrypt (`pgcrypto`) and never stored or returned in clear text.
@@ -269,6 +269,8 @@ persona/
 ├── scripts/
 │   └── import.sh       # Imports credentials and workflows into n8n
 ├── docs/
+│   ├── prompts.md      # The 3 LLM steps, prompts, output formats, versions
+│   ├── ai-tests.md     # Tests of the AI steps, variation, limits
 │   ├── rgpd.md         # GDPR: data, retention, rights
 │   └── security-audit.md  # Threats, tests, known limits
 ├── keynote/            # Presentation material

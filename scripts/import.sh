@@ -51,9 +51,26 @@ require("fs").writeFileSync(process.argv[1], JSON.stringify(credentials));
 n8n import:credentials --input="$CREDENTIALS_FILE"
 n8n import:workflow --separate --input=/workflows
 
-# Sub-workflows first, then the chat entry point
-for id in prsnAuth00000001 prsnUserTools001 prsnMainChat0001; do
+# Sub-workflows first, then the workflows that call them, then the triggers
+for id in \
+  prsnAuth00000001 \
+  prsnUserTools001 \
+  prsnSendNewsl001 \
+  prsnMainChat0001 \
+  prsnScheduler001 \
+  prsnFetchNews001
+do
   n8n publish:workflow --id="$id"
 done
+
+# First news fetch, so a newsletter can be tested right away (fetch_news then runs
+# every hour). Another task broker port is used because n8n is already running.
+echo "Fetching news for the first time (this can take a minute)..."
+if N8N_RUNNERS_BROKER_PORT=5690 n8n execute --id=prsnFetchNews001 > /dev/null 2>&1; then
+  echo "News fetched."
+else
+  echo "Warning: the first news fetch failed. Run it later with:"
+  echo "  docker compose exec -e N8N_RUNNERS_BROKER_PORT=5690 n8n n8n execute --id=prsnFetchNews001"
+fi
 
 echo "Done. Restart n8n to apply: docker compose restart n8n"

@@ -101,7 +101,7 @@ docker compose exec n8n sh /scripts/import.sh
 docker compose restart n8n
 ```
 
-The script creates the n8n credentials from your `.env`, imports every file of `workflows/` and publishes them. It can be run again after pulling new versions of the workflows (existing ones are overwritten).
+The script creates the n8n credentials from your `.env`, imports every file of `workflows/`, publishes them and runs a first news fetch. It can be run again after pulling new versions of the workflows (existing ones are overwritten).
 
 > After the restart, n8n needs about 20 seconds to switch to the newly published versions. Messages sent right away may still be handled by the previous version.
 
@@ -110,6 +110,9 @@ The script creates the n8n credentials from your `.env`, imports every file of `
 | `Persona - main_chat` | Chat entry point: session check, routing, AI agent |
 | `Persona - auth` | Sign-up, login and sessions (sub-workflow, no LLM involved) |
 | `Persona - user_tools` | The only actions the agent can perform on user data: read and update preferences, export all personal data, pause or resume the newsletter (sub-workflow) |
+| `Persona - fetch_news` | Every hour: fetches the RSS sources, cleans and stores the news, purges news older than 7 days |
+| `Persona - scheduler` | Every minute: finds the users whose delivery time has just arrived in their timezone and starts their newsletter |
+| `Persona - send_newsletter` | Selects the news for one user, summarizes them and sends the email (sub-workflow) |
 
 ## Credentials
 
@@ -156,14 +159,51 @@ Once logged in, just talk to the assistant in natural language, for example:
 | Topics | `tech`, `ai`, `science`, `economy`, `sport`, `culture`, `health`, `environment`, `world` (the assistant maps your words to this list) |
 | Keywords | Up to 10, 40 characters each |
 | Email | A valid email address |
-| Delivery time | Every day at `HH:MM` (24h), in your timezone |
+| Delivery time | Every day at `HH:MM` (24h), in your timezone. The newsletter is daily |
 | Timezone | An [IANA name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones), `Europe/Paris` by default |
 
 The assistant runs on the local Ollama model, so the first answer can take a few seconds while the model loads.
 
 ## Testing a scheduled newsletter
 
-_TODO_
+The newsletter is sent **every day** at the time chosen by the user, in their timezone. To see one arrive in a few minutes:
+
+1. **Check that news are available.** The import script fetches them once, then `fetch_news` runs every hour. To count them, or to fetch again right away:
+
+   ```bash
+   docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT topic_slug, count(*) FROM news GROUP BY 1"'
+   docker compose exec -e N8N_RUNNERS_BROKER_PORT=5690 n8n n8n execute --id=prsnFetchNews001
+   ```
+
+2. **Create an account and set it up in the chat**, with a delivery time **3 minutes from now** (24h format, in your timezone):
+
+   ```text
+   /register alice MyPassw0rd accept
+   I'm interested in tech and AI. Send it to me at <your email> every day at 14:03
+   What are my current settings?
+   ```
+
+   The default timezone is `Europe/Paris`. If you are elsewhere, also say for example *"I live in New York"*.
+
+3. **Wait.** The scheduler checks every minute. Once the time is reached, selecting and summarizing the news with the local model takes about a minute, then the email is sent from the Gmail address of `SMTP_USER`. Check the spam folder too.
+
+4. **Test again.** Each user receives at most one newsletter per day. To send another one today, either create a new account, or reset the last sending and choose a new time:
+
+   ```bash
+   docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+   UPDATE users SET last_sent_at = NULL WHERE username = 'alice';
+   SQL
+   ```
+
+If no email arrives:
+
+| Check | How |
+| --- | --- |
+| The time is right | *"What are my current settings?"* shows the time and timezone. A time missed by less than 15 minutes is still sent (catch-up window). |
+| There are recent news for the chosen topics | Query above. No newsletter is sent when no news of the last 48 hours matches the user's topics. |
+| The newsletter is not paused | The settings show `newsletter_active: true` (*"Resume my newsletter"* otherwise). |
+| The workflows ran | In n8n, open **Persona - scheduler** and **Persona - send_newsletter**, tab **Executions**. |
+| Ollama and Gmail work | `ollama list` shows `qwen2.5:7b`; `SMTP_PASSWORD` is a Gmail app password, without spaces. |
 
 ## Data storage
 

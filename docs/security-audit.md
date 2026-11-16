@@ -6,7 +6,7 @@ This audit lists the threats against Persona, the protections in place, how they
 
 | Item | Version |
 | --- | --- |
-| n8n | 2.45 (Docker image `latest` on the team machines) |
+| n8n | 2.45.7 (pinned in `.env.example`) |
 | Database | PostgreSQL 16 |
 | Language model | Ollama, `qwen2.5:7b`, local |
 | Workflows audited | `main_chat`, `auth`, `user_tools` (chat side), `fetch_news`, `send_newsletter`, `scheduler` (sending side) |
@@ -61,7 +61,7 @@ Key boundary: **everything the user or an RSS feed sends is untrusted**, includi
 | T16 | A compromised workflow destroying the database | n8n connects with `persona_app`: read/write on data only, no schema changes, read-only topics | `DROP TABLE`, `INSERT INTO topics` as `persona_app` | ✅ Permission denied |
 | T17 | Network access to n8n or Postgres | Ports bound to `127.0.0.1` | `docker-compose.yml` review | ✅ Local access only |
 | T18 | Secrets in the repository | `.env` ignored; credentials generated from `.env` by `scripts/import.sh`; fixed generic credential names in the workflows | Repository review | ✅ No secret committed |
-| T19 | Prompt injection through RSS content (sending side) | Selection: the model can only return ids from the candidate list; summaries: URLs stripped, 350 characters max, plain-text email; promotional titles filtered | Code review of `send_newsletter` | ✅ A malicious article cannot add a link or a fake article to the email |
+| T19 | Prompt injection through RSS content (sending side) | Selection: the model can only return ids from the candidate list; summaries: URLs stripped, 350 characters max; promotional titles filtered; HTML email in which every title, summary and source is escaped and only `http(s)` links are accepted, with a plain-text version as fallback | Code review of `send_newsletter` | ✅ A malicious article cannot add a link, HTML or a fake article to the email |
 | T20 | Double sending / missed sending | `scheduler` reserves users with `last_sent_at` before sending and uses a 15-minute catch-up window | Code review of `scheduler` | ✅ One newsletter per day per user |
 
 ## 4. Issues found and fixed during the project

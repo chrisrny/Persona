@@ -6,16 +6,37 @@ Users talk to a single chat interface to create an account, choose their topics 
 
 ## Table of contents
 
-1. [Requirements](#requirements)
-2. [Installation](#installation)
-3. [Importing the workflows](#importing-the-workflows)
-4. [Credentials](#credentials)
-5. [Using Persona through the chatbot](#using-persona-through-the-chatbot)
-6. [Testing a scheduled newsletter](#testing-a-scheduled-newsletter)
-7. [Data storage](#data-storage)
-8. [GDPR](#gdpr)
-9. [Security](#security)
-10. [Project structure](#project-structure)
+1. [Architecture](#architecture)
+2. [Requirements](#requirements)
+3. [Installation](#installation)
+4. [Importing the workflows](#importing-the-workflows)
+5. [Credentials](#credentials)
+6. [Using Persona through the chatbot](#using-persona-through-the-chatbot)
+7. [Testing a scheduled newsletter](#testing-a-scheduled-newsletter)
+8. [Data storage](#data-storage)
+9. [GDPR](#gdpr)
+10. [Security](#security)
+11. [Additional features](#additional-features)
+12. [Project structure](#project-structure)
+
+## Architecture
+
+```txt
+ Chat page ──▶ main_chat ── message checks (length, rate limits)
+                  │        └ session check (SQL)
+                  ├─ not logged in ─▶ auth ............ /register, /login (no AI)
+                  └─ logged in ─┬──▶ /logout, /delete_account (no AI)
+                                └──▶ AI agent (Ollama) ──tools──▶ user_tools ──▶ Postgres
+
+ every hour  ─▶ fetch_news ─────▶ RSS sources ─▶ news table
+ every minute ─▶ scheduler ─────▶ send_newsletter ─▶ select + summarize (Ollama) ─▶ Gmail SMTP
+```
+
+- **One entry point**: every feature goes through the chat trigger of `main_chat`.
+- **Authentication happens before the AI**: the assistant is only reached with a verified session, and the id of that session is injected into every tool call.
+- **The two halves only meet in Postgres**: the chat side writes the users' preferences, the sending side reads them.
+
+The newsletter is sent as an HTML email (one card per news: topic, source, title, 2-sentence summary, link to the article) with a plain-text version for mail clients that do not display HTML.
 
 ## Requirements
 
@@ -257,6 +278,17 @@ Threats, tests and known limits are documented in [docs/security-audit.md](docs/
 - **Narrow assistant**: the system prompt limits the assistant to newsletter settings and tells it to ignore requests to change its rules or play another role.
 - **Least privilege**: workflows connect with `APP_DB_USER`, which can read and write data but cannot change the schema or the topic list.
 - **No password in the execution history**: `main_chat`, `auth` and `user_tools` do not save their executions, since chat messages may contain passwords. n8n flags these runs as deleted right away and purges them from its database on its next pruning cycle. To debug, temporarily set **Workflow settings → Save successful production executions** back to *Save*.
+
+## Additional features
+
+Features beyond the core subject:
+
+| Feature | Where |
+| --- | --- |
+| HTML newsletter with a plain-text fallback, all external content escaped | `send_newsletter` |
+| Security audit: threats, tests, the three attack families, model weaknesses, known limits | [docs/security-audit.md](docs/security-audit.md) |
+| Proof of GDPR compliance: data inventory, retention, processors, every right exercisable from the chat | [docs/rgpd.md](docs/rgpd.md) |
+| Prompt documentation with successive versions, and tests of the AI steps | [docs/prompts.md](docs/prompts.md), [docs/ai-tests.md](docs/ai-tests.md) |
 
 ## Project structure
 

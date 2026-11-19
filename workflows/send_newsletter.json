@@ -1,0 +1,483 @@
+{
+  "id": "prsnSendNewsl001",
+  "name": "Persona - send_newsletter",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "user_id"
+            }
+          ]
+        }
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0001",
+      "name": "Appelé par le scheduler",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, username, email, timezone, keywords\nFROM users\nWHERE id = $1::uuid AND active AND email IS NOT NULL;",
+        "options": {
+          "queryReplacement": "={{ [ $json.user_id ] }}"
+        }
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0004",
+      "name": "Utilisateur",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Pré-filtre : sujets suivis par l'utilisateur, news des dernières 48h,\n-- jamais envoyées à cet utilisateur. Max 15 par sujet pour garder de la variété.\nWITH ranked AS (\n  SELECT n.id, n.title, n.description, n.url, n.source, n.topic_slug, n.published_at,\n         row_number() OVER (PARTITION BY n.topic_slug ORDER BY n.published_at DESC) AS rk\n  FROM news n\n  JOIN user_topics ut ON ut.topic_slug = n.topic_slug AND ut.user_id = $1::uuid\n  WHERE n.published_at > now() - interval '48 hours'\n    AND NOT EXISTS (\n      SELECT 1 FROM newsletter_items ni\n      JOIN newsletters nl ON nl.id = ni.newsletter_id\n      WHERE nl.user_id = $1::uuid AND ni.news_id = n.id)\n)\nSELECT id, title, description, url, source, topic_slug, published_at\nFROM ranked\nWHERE rk <= 15\nORDER BY published_at DESC\nLIMIT 40;",
+        "options": {
+          "queryReplacement": "={{ [ $json.id ] }}"
+        }
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0005",
+      "name": "Candidats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Une seule entrée pour le LLM : la liste compacte des candidats (id | sujet | source | titre)\nconst user = $('Utilisateur').first().json;\nconst news = $input.all().map(i => i.json).filter(n => n.id);\nif (news.length === 0) return [];   // rien de neuf pour cet utilisateur\nconst list = news.map(n => `${n.id} | ${n.topic_slug} | ${n.source} | ${n.title}`).join('\\n');\nreturn [{ json: { user_id: user.id, keywords: user.keywords || [], count: news.length, list } }];"
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0006",
+      "name": "Préparer la liste",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu sélectionnes les articles d'une newsletter personnalisée.\nMots-clés de l'utilisateur : {{ $json.keywords.length ? $json.keywords.join(', ') : 'aucun' }}\n\nArticles candidats (id | sujet | source | titre) :\n{{ $json.list }}\n\nClasse les 10 articles les plus intéressants pour cet utilisateur, du plus au moins intéressant : en priorité ceux qui correspondent à ses mots-clés, puis les informations les plus importantes.\nRègles : un seul article par événement (si plusieurs articles parlent de la même chose, garde le meilleur), varie les sujets et les sources, et exclus les bons plans, promotions et offres commerciales.\nRéponds uniquement avec un objet JSON de la forme {\"ids\": [12, 7, 3]} contenant 10 id pris dans la liste."
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0007",
+      "name": "Choisir les news",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1100,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:7b",
+        "options": {
+          "temperature": 0.2,
+          "format": "json",
+          "numPredict": 200
+        }
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0008",
+      "name": "Ollama",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        220
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "prsnOllamaCred01",
+          "name": "LLM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Garde-fous après le classement du LLM :\n// 1. on ne garde que des id présents dans les candidats (le LLM ne peut rien inventer)\n// 2. on écarte les doublons de sujet : titres qui partagent un nom propre (Nvidia, COP31…) ou 2 mots significatifs\n// 3. on écarte les promos ; si la liste est trop courte, on complète avec les news les plus récentes\n// 4. pas deux articles avec la même description (même article republié sous un autre titre)\n// 5. au plus 2 news par source ; la limite est relâchée seulement s'il manque des news pour arriver à 6\nconst MAX = 6;\nconst PER_SOURCE = 2;\nconst cands = $('Candidats').all().map(i => i.json).filter(n => n.id);\nconst byId = new Map(cands.map(n => [String(n.id), n]));\nlet ids = [];\ntry {\n  // Avec le format JSON d'Ollama, la chaîne renvoie déjà { ids: [...] } ; sinon du texte à parser\n  let out = Array.isArray($json.ids) ? $json : $json.text;\n  if (typeof out === 'string') {\n    const m = out.match(/\\{[\\s\\S]*\\}/);\n    out = JSON.parse(m ? m[0] : out);\n  }\n  ids = ((out && out.ids) || []).map(String);\n} catch (e) {}\n\nconst STOP = new Set(['dans', 'pour', 'avec', 'sans', 'sous', 'plus', 'moins', 'leur', 'leurs', 'cette', 'entre', 'après', 'avant', 'depuis', 'comme', 'mais', 'tout', 'tous', 'nouveau', 'nouvelle', 'deux', 'trois', 'with', 'from', 'that', 'this', 'what', 'have', 'about', 'their', 'will', 'into', 'more', 'over']);\nconst words = (t) => new Set(\n  t.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n    .split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !STOP.has(w) && !/^\\d+$/.test(w))\n);\nconst norm = (w) => w.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\n// Noms propres et sigles : mot en majuscule hors début de titre, tout en capitales, ou lettres + chiffres (COP31)\nconst entities = (t) => new Set(\n  t.split(/[^\\p{L}\\p{N}]+/u).filter((w, i) => w.length >= 3 && (\n    /\\p{L}/u.test(w) && /\\d/.test(w) || /^\\p{Lu}{3,}$/u.test(w) || (i > 0 && /^\\p{Lu}\\p{Ll}/u.test(w))\n  )).map(norm).filter(w => !STOP.has(w))\n);\nconst PROMO = /bon plan|promo|black friday|singles day|soldes|offre|deal|réduction|à prix|prix (fou|cassé|mini|choc|bas)|-\\d+ ?%|\\d+ ?€/i;\n\nconst descKey = (n) => norm(n.description || '').replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 120);\nconst picked = [];\nconst tryAdd = (n, capSources) => {\n  if (!n || picked.length >= MAX || picked.includes(n) || PROMO.test(n.title)) return;\n  if (capSources && picked.filter(p => p.source === n.source).length >= PER_SOURCE) return;\n  const w = words(n.title), e = entities(n.title), d = descKey(n);\n  const dup = picked.some(p => {\n    const pw = words(p.title), pe = entities(p.title);\n    return (d.length >= 40 && descKey(p) === d)\n      || [...pw].filter(x => w.has(x)).length >= 2 || [...e].some(x => pw.has(x)) || [...pe].some(x => w.has(x));\n  });\n  if (!dup) picked.push(n);\n};\nconst ranked = [...new Set(ids)].map(id => byId.get(id));\nfor (const capSources of [true, false]) {\n  ranked.forEach(n => tryAdd(n, capSources));\n  cands.forEach(n => tryAdd(n, capSources));\n}\nreturn picked.map(n => ({ json: n }));"
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0009",
+      "name": "Top 6",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Une seule entrée pour le LLM : les 6 news retenues (id | titre | description)\nconst news = $input.all().map(i => i.json);\nconst articles = news\n  .map(n => `[${n.id}] ${n.title}\\n${(n.description || '').slice(0, 400)}`)\n  .join('\\n\\n');\nreturn [{ json: { count: news.length, articles } }];"
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0010",
+      "name": "Préparer les résumés",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu rédiges les résumés d'une newsletter d'actualité en français.\nPour chaque article ci-dessous, écris un résumé factuel de 2 phrases maximum, en français, à partir du titre et de la description uniquement. N'invente rien, ne donne pas ton avis, ne mets pas de lien.\n\n{{ $json.articles }}\n\nRéponds uniquement avec un objet JSON de la forme {\"summaries\": [{\"id\": 12, \"summary\": \"...\"}]}, avec un élément par article."
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0011",
+      "name": "Résumer les news",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1880,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": "qwen2.5:7b",
+        "options": {
+          "temperature": 0.3,
+          "format": "json",
+          "numPredict": 1000
+        }
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0012",
+      "name": "Ollama (résumés)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1880,
+        220
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "prsnOllamaCred01",
+          "name": "LLM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Assemble l'email en deux versions (HTML + texte de secours) :\n// news retenues + résumés du LLM (avec repli sur la description)\nconst user = $('Utilisateur').first().json;\nconst news = $('Top 6').all().map(i => i.json);\n\nlet summaries = {};\ntry {\n  let out = Array.isArray($json.summaries) ? $json : $json.text;\n  if (typeof out === 'string') {\n    const m = out.match(/\\{[\\s\\S]*\\}/);\n    out = JSON.parse(m ? m[0] : out);\n  }\n  for (const s of (out && out.summaries) || []) summaries[String(s.id)] = String(s.summary || '');\n} catch (e) {}\n\n// Le résumé vient d'un LLM nourri par du contenu externe : on le borne (pas d'URL, 350 caractères max)\nconst clean = (s) => s.replace(/https?:\\/\\/\\S+|www\\.\\S+/gi, '').replace(/\\s+/g, ' ').trim().slice(0, 350);\nconst fallback = (n) => (n.description || '').replace(/\\s+/g, ' ').trim().slice(0, 250);\nconst items = news.map(n => ({ ...n, summary: clean(summaries[String(n.id)] || '') || fallback(n) }));\n\nconst date = DateTime.now().setZone(user.timezone || 'Europe/Paris').setLocale('fr').toFormat('cccc d LLLL');\nconst subject = `Ta newsletter Persona du ${date}`;\nconst footer = [\n  'Tu reçois cet email parce que tu es inscrit à Persona.',\n  'Pour changer tes sujets, ton horaire ou te désinscrire, il suffit de le demander dans le chat Persona.',\n];\n\n// --- Version texte (clients mail qui n'affichent pas le HTML) ---\nconst text = [\n  `Bonjour ${user.username},`,\n  '',\n  `Voici ta sélection Persona du ${date} : ${items.length} news choisies pour toi.`,\n  '',\n  items.map((n, i) => `${i + 1}. ${n.title}\\n${n.summary}\\nSource : ${n.source}\\n${n.url}`).join('\\n\\n'),\n  '',\n  '--',\n  ...footer,\n].join('\\n');\n\n// --- Version HTML ---\n// Titres, résumés et sources viennent de flux RSS ou du LLM : tout est échappé (pas d'injection HTML)\n// et seuls les liens http(s) sont acceptés.\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\nconst safeUrl = (u) => (/^https?:\\/\\//i.test(u || '') ? esc(u) : '#');\nconst LABELS = { tech: 'Tech', ai: 'IA', science: 'Science', economy: 'Économie', sport: 'Sport', culture: 'Culture', health: 'Santé', environment: 'Environnement', world: 'International' };\nconst dateCap = date.charAt(0).toUpperCase() + date.slice(1);\n\nconst cards = items.map((n, i) => `\n<tr><td style=\"padding:20px 0;border-top:1px solid #e5e7eb;\">\n  <div style=\"font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;\">${i + 1} &middot; ${esc(LABELS[n.topic_slug] || n.topic_slug)} &middot; ${esc(n.source)}</div>\n  <a href=\"${safeUrl(n.url)}\" style=\"font-size:18px;line-height:1.35;font-weight:700;color:#111827;text-decoration:none;\">${esc(n.title)}</a>\n  <p style=\"margin:8px 0 10px;font-size:15px;line-height:1.55;color:#374151;\">${esc(n.summary)}</p>\n  <a href=\"${safeUrl(n.url)}\" style=\"font-size:14px;font-weight:600;color:#4f46e5;text-decoration:none;\">Lire l'article &rarr;</a>\n</td></tr>`).join('');\n\nconst html = `<!DOCTYPE html>\n<html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${esc(subject)}</title></head>\n<body style=\"margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f3f4f6;\"><tr><td align=\"center\" style=\"padding:24px 12px;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;background:#ffffff;border-radius:12px;\">\n<tr><td style=\"padding:28px 32px 8px;\">\n  <div style=\"font-size:22px;font-weight:800;color:#4f46e5;\">Persona</div>\n  <div style=\"font-size:14px;color:#6b7280;margin-top:2px;\">${esc(dateCap)}</div>\n  <p style=\"margin:20px 0 4px;font-size:16px;line-height:1.5;color:#111827;\">Bonjour ${esc(user.username)},<br>voici les ${items.length} news choisies pour toi aujourd'hui.</p>\n</td></tr>\n<tr><td style=\"padding:0 32px;\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">${cards}\n</table></td></tr>\n<tr><td style=\"padding:20px 32px 28px;border-top:1px solid #e5e7eb;font-size:12px;line-height:1.5;color:#9ca3af;\">${footer.map(esc).join('<br>')}</td></tr>\n</table>\n</td></tr></table>\n</body></html>`;\n\nreturn [{ json: {\n  user_id: user.id,\n  to: user.email,\n  subject,\n  text,\n  html,\n  news_ids: items.map(n => n.id),\n} }];"
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0013",
+      "name": "Composer email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "fromEmail": "Persona <newsletter@persona.local>",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "both",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        },
+        "html": "={{ $json.html }}"
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0014",
+      "name": "Envoyer email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2440,
+        0
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "prsnSmtpCred0001",
+          "name": "SMTP Persona"
+        }
+      },
+      "webhookId": "d90e45c6-1f96-4d05-864a-c979fd97fedb",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Enregistre l'envoi : la newsletter, ses news (pour ne jamais les renvoyer) et last_sent_at (anti double envoi)\nWITH nl AS (\n  INSERT INTO newsletters (user_id) VALUES ($1::uuid) RETURNING id\n), items AS (\n  INSERT INTO newsletter_items (newsletter_id, news_id)\n  SELECT nl.id, unnest($2::bigint[]) FROM nl\n  RETURNING news_id\n), upd AS (\n  UPDATE users SET last_sent_at = now() WHERE id = $1::uuid\n)\nSELECT (SELECT id FROM nl) AS newsletter_id, (SELECT count(*) FROM items) AS news_count;",
+        "options": {
+          "queryReplacement": "={{ [ $('Composer email').item.json.user_id, '{' + $('Composer email').item.json.news_ids.join(',') + '}' ] }}"
+        }
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0015",
+      "name": "Enregistrer envoi",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2660,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sortie du contrat avec le scheduler : { sent, news_count }\nreturn [{ json: { sent: true, news_count: Number($json.news_count) } }];"
+      },
+      "id": "a1c0e5d2-1f3b-4c6a-9e01-5b7d2f8a0016",
+      "name": "Résultat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ]
+    },
+    {
+      "id": "94b8fd35-8ef1-4993-899d-a283e3769fd4",
+      "name": "Libérer le créneau",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2660,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- L'email n'est pas parti : on annule la réservation posée par le scheduler\n-- pour qu'il réessaie à la minute suivante (tant qu'on est dans la fenêtre de 15 min).\nUPDATE users SET last_sent_at = NULL WHERE id = $1::uuid RETURNING id AS user_id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Composer email').item.json.user_id ] }}"
+        }
+      }
+    },
+    {
+      "id": "0083fa2e-a12c-4fda-8e61-26eea012f078",
+      "name": "Résultat (échec)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Sortie du contrat avec le scheduler en cas d'échec d'envoi\nreturn [{ json: { sent: false, news_count: 0 } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Appelé par le scheduler": {
+      "main": [
+        [
+          {
+            "node": "Utilisateur",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Utilisateur": {
+      "main": [
+        [
+          {
+            "node": "Candidats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Candidats": {
+      "main": [
+        [
+          {
+            "node": "Préparer la liste",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparer la liste": {
+      "main": [
+        [
+          {
+            "node": "Choisir les news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Choisir les news": {
+      "main": [
+        [
+          {
+            "node": "Top 6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Choisir les news",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Top 6": {
+      "main": [
+        [
+          {
+            "node": "Préparer les résumés",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparer les résumés": {
+      "main": [
+        [
+          {
+            "node": "Résumer les news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Résumer les news": {
+      "main": [
+        [
+          {
+            "node": "Composer email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Composer email": {
+      "main": [
+        [
+          {
+            "node": "Envoyer email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envoyer email": {
+      "main": [
+        [
+          {
+            "node": "Enregistrer envoi",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Libérer le créneau",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enregistrer envoi": {
+      "main": [
+        [
+          {
+            "node": "Résultat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama (résumés)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Résumer les news",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Libérer le créneau": {
+      "main": [
+        [
+          {
+            "node": "Résultat (échec)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
+  },
+  "meta": null,
+  "pinData": null,
+  "tags": []
+}

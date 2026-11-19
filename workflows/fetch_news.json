@@ -1,0 +1,256 @@
+{
+  "id": "prsnFetchNews001",
+  "name": "Persona - fetch_news",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "03d87dab-8df8-43ab-b998-d3a383043379",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        1488,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flux RSS par sujet. Slugs alignés sur la table topics de db/init.sql\nconst sources = [\n  { topic_slug: \"tech\",           url: \"https://www.theverge.com/rss/index.xml\" },\n  { topic_slug: \"tech\",           url: \"https://www.numerama.com/feed/\" },\n  { topic_slug: \"tech\",           url: \"https://www.01net.com/feed/\" },\n  { topic_slug: \"ai\",             url: \"https://techcrunch.com/category/artificial-intelligence/feed/\" },\n  { topic_slug: \"ai\",             url: \"https://www.theverge.com/rss/ai-artificial-intelligence/index.xml\" },\n  { topic_slug: \"ai\",             url: \"https://www.actuia.com/feed/\" },\n  { topic_slug: \"science\",        url: \"https://www.lemonde.fr/sciences/rss_full.xml\" },\n  { topic_slug: \"science\",        url: \"https://www.futura-sciences.com/rss/actualites.xml\" },\n  { topic_slug: \"economy\",        url: \"https://www.lemonde.fr/economie/rss_full.xml\" },\n  { topic_slug: \"economy\",        url: \"https://www.franceinfo.fr/economie.rss\" },\n  { topic_slug: \"health\",         url: \"https://www.lemonde.fr/sante/rss_full.xml\" },\n  { topic_slug: \"health\",         url: \"https://www.franceinfo.fr/sante.rss\" },\n  { topic_slug: \"environment\",    url: \"https://www.lemonde.fr/planete/rss_full.xml\" },\n  { topic_slug: \"environment\",    url: \"https://reporterre.net/spip.php?page=backend\" },\n  { topic_slug: \"world\",          url: \"https://www.lemonde.fr/international/rss_full.xml\" },\n  { topic_slug: \"world\",          url: \"https://www.france24.com/fr/rss\" },\n  { topic_slug: \"culture\",        url: \"https://www.lemonde.fr/culture/rss_full.xml\" },\n  { topic_slug: \"culture\",        url: \"https://www.franceinfo.fr/culture.rss\" },\n  { topic_slug: \"sport\",          url: \"https://www.lequipe.fr/rss/actu_rss.xml\" },\n  { topic_slug: \"sport\",          url: \"https://www.franceinfo.fr/sports.rss\" },\n];\nreturn sources.map(s => ({ json: s }));"
+      },
+      "id": "e2ee5a76-4659-4880-b422-8736056a54a5",
+      "name": "Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "238e26e7-52cf-4192-8ca1-27691daf077e",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1936,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "id": "2b5a31f7-9db3-4de5-9a37-29a584e9db3b",
+      "name": "RSS Read",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        2176,
+        480
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Un seul flux par tour de boucle : on étiquette chaque article avec son sujet et son flux\nlet src = {};\ntry { src = $('Loop Over Items').item.json; } catch (e) {}\nreturn { json: { ...$json, topic_slug: src.topic_slug || null, feed_url: src.url || null } };"
+      },
+      "id": "aa6ca385-fa49-462a-b9b6-05962ffad8ff",
+      "name": "Taguer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Décode les entités HTML (&#8217; &amp; …) et retire les balises résiduelles\nconst decode = (s = '') => String(s)\n  .replace(/&#(\\d+);/g, (_, n) => String.fromCodePoint(Number(n)))\n  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))\n  .replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\").replace(/&nbsp;/g, ' ')\n  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')\n  .replace(/<[^>]*>/g, '')\n  .replace(/\\s+/g, ' ').trim();\n\nconst since = Date.now() - 24 * 3600 * 1000;   // fraîcheur : dernières 24h\nconst fetchedAt = new Date().toISOString();\nconst seen = new Set();\nconst out = [];\n\nfor (const { json: a } of $input.all()) {\n  if (!a.link || !a.topic_slug || seen.has(a.link)) continue;   // erreur, flux vide, ou doublon\n  const date = new Date(a.isoDate || a.pubDate);\n  if (isNaN(date) || date < since) continue;                     // sans date ou trop ancien\n  seen.add(a.link);\n  out.push({ json: {\n    url: a.link,\n    title: decode(a.title),\n    description: decode(a.contentSnippet || a.content || a.description).slice(0, 500),\n    source: (a.link.match(/^https?:\\/\\/(?:www\\.)?([^\\/]+)/) || [])[1] || '',\n    topic_slug: a.topic_slug,\n    published_at: date.toISOString(),\n    fetched_at: fetchedAt,\n  }});\n}\nreturn out;"
+      },
+      "id": "2d150041-13e1-4e52-b168-64f18793e8aa",
+      "name": "Normaliser",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO news (url, title, description, source, topic_slug, published_at, fetched_at)\nVALUES ($1, $2, $3, $4, $5, $6, $7)\nON CONFLICT (url) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{ [ $json.url, $json.title, $json.description, $json.source, $json.topic_slug, $json.published_at, $json.fetched_at ] }}"
+        }
+      },
+      "id": "6f1e2a9c-4b7d-4e3a-9c51-2d8f0b7a4e11",
+      "name": "Insérer news",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2436,
+        208
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "7c3e9a1b-5d2f-4e8a-b6c4-1f0d9e2a0001",
+      "name": "Toutes les heures",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1488,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Purge (minimisation) : news de plus de 7 jours jamais envoyées.\n-- Celles qui figurent dans une newsletter envoyée restent, pour garder l'historique.\nDELETE FROM news n\nWHERE n.fetched_at < now() - interval '7 days'\n  AND NOT EXISTS (SELECT 1 FROM newsletter_items ni WHERE ni.news_id = n.id);",
+        "options": {}
+      },
+      "id": "7c3e9a1b-5d2f-4e8a-b6c4-1f0d9e2a0002",
+      "name": "Purger les vieilles news",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1712,
+        700
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "prsnPostgresCred",
+          "name": "Postgres Persona"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Sources",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Purger les vieilles news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sources": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Normaliser",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read": {
+      "main": [
+        [
+          {
+            "node": "Taguer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Taguer": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normaliser": {
+      "main": [
+        [
+          {
+            "node": "Insérer news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Toutes les heures": {
+      "main": [
+        [
+          {
+            "node": "Sources",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Purger les vieilles news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
+  },
+  "meta": {},
+  "pinData": {},
+  "tags": []
+}
